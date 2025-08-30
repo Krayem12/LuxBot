@@ -11,7 +11,7 @@ TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
 # سجل الإشارات الأخيرة لتجنب الإرسال المكرر
 recent_signals = deque(maxlen=10)
-SIGNAL_THRESHOLD = 3  # عدد الإشارات المطلوبة قبل الإرسال
+SIGNAL_THRESHOLD = 15  # عدد الإشارات المطلوبة قبل الإرسال
 
 # كل الإشارات المدعومة وفق آخر تحديث LuxAlgo
 LUXALGO_SIGNALS = [
@@ -95,3 +95,4 @@ def send_alert():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
