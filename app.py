@@ -10,13 +10,9 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# نخزن الإشارات
 signals_buffer = []
-
-# المدة الزمنية للفحص (15 دقيقة)
 TIME_LIMIT = timedelta(minutes=15)
 
-# جميع الإشارات المهمة من آخر تحديث LuxAlgo
 TRACKED_SIGNALS = [
     "bullish_confirmation", "bullish_confirmation+", "bullish_confirmation_any", "bullish_confirmation_turn+",
     "bearish_confirmation", "bearish_confirmation+", "bearish_confirmation_any", "bearish_confirmation_turn+",
@@ -34,9 +30,11 @@ TRACKED_SIGNALS = [
 
 def send_telegram_alert(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+    payload = {"chat_id": CHAT_ID, "text": message}  # بدون HTML
     try:
-        requests.post(url, json=payload)
+        response = requests.post(url, json=payload)
+        if not response.ok:
+            print("خطأ في إرسال الرسالة:", response.text)
     except Exception as e:
         print("خطأ في إرسال الرسالة:", e)
 
@@ -54,15 +52,13 @@ def webhook():
     if signal_name not in TRACKED_SIGNALS:
         return {"status": "ignored"}
 
-    # حفظ الإشارة
     signals_buffer.append((timestamp, signal_name, indicator_name, strength))
 
-    # تنظيف الإشارات القديمة
     cutoff = datetime.utcnow() - TIME_LIMIT
     signals_buffer[:] = [s for s in signals_buffer if s[0] > cutoff]
 
-    # إرسال كل إشارة فورياً
-    immediate_message = f"🚨 LuxAlgo Alert فوراً:\n📊 المؤشر: {indicator_name}\n⚡ الإشارة: {signal_name}\n💪 القوة: {strength}\n⏱ {timestamp.strftime('%H:%M:%S')}"
+    # رسالة فورية لكل إشارة
+    immediate_message = f"🚨 LuxAlgo Alert فوراً:\nالمؤشر: {indicator_name}\nالإشارة: {signal_name}\nالقوة: {strength}\nالوقت: {timestamp.strftime('%H:%M:%S')}"
     send_telegram_alert(immediate_message)
 
     return {"status": "ok"}
@@ -73,31 +69,26 @@ def periodic_report():
         if not signals_buffer:
             continue
 
-        # تنظيف الإشارات القديمة
         cutoff = datetime.utcnow() - TIME_LIMIT
         signals_buffer[:] = [s for s in signals_buffer if s[0] > cutoff]
 
         if not signals_buffer:
             continue
 
-        # تجميع الإشارات حسب المؤشر
         grouped = {}
         for t, signal, indicator, strength in signals_buffer:
             grouped.setdefault(indicator, []).append((signal, strength, t))
 
-        # تجهيز رسالة التقرير
-        message_lines = ["🚨 <b>LuxAlgo Strongest Signals Report (آخر 15 دقيقة)</b>\n"]
+        message_lines = ["🚨 LuxAlgo Strongest Signals Report (آخر 15 دقيقة)\n"]
         for indicator, sigs in grouped.items():
             sigs_sorted = sorted(sigs, key=lambda x: x[1], reverse=True)[:5]
-            message_lines.append(f"\n📊 <b>{indicator}</b>")
+            message_lines.append(f"\nالمؤشر: {indicator}")
             for signal, strength, t in sigs_sorted:
-                message_lines.append(f" • {signal} (💪 {strength}) ⏱ {t.strftime('%H:%M:%S')}")
+                message_lines.append(f" • {signal} (القوة: {strength}) الوقت: {t.strftime('%H:%M:%S')}")
 
         send_telegram_alert("\n".join(message_lines))
-        # بعد التقرير نترك الإشارات لتبقى فترة الـ 15 دقيقة نفسها
 
 if __name__ == '__main__':
-    # تشغيل الخيط الدوري لتقرير كل 15 دقيقة
     report_thread = threading.Thread(target=periodic_report, daemon=True)
     report_thread.start()
     app.run(host="0.0.0.0", port=5000)
