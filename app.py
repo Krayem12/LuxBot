@@ -9,11 +9,25 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# نخزن الإشارات الواردة مؤقتاً
+# مدة الاحتفاظ بالإشارات مؤقتاً (15 دقيقة)
+TIME_LIMIT = timedelta(minutes=15)
 signals_buffer = []
 
-# المدة الزمنية للفحص (15 دقيقة)
-TIME_LIMIT = timedelta(minutes=15)
+# جميع الإشارات المهمة من آخر تحديث LuxAlgo
+TRACKED_SIGNALS = [
+    "bullish_confirmation", "bullish_confirmation+", "bullish_confirmation_any", "bullish_confirmation_turn+",
+    "bearish_confirmation", "bearish_confirmation+", "bearish_confirmation_any", "bearish_confirmation_turn+",
+    "bullish_contrarian", "bullish_contrarian+", "bullish_contrarian_any",
+    "bearish_contrarian", "bearish_contrarian+", "bearish_contrarian_any",
+    "regular_bullish_hyperwave_signal", "oversold_bullish_hyperwave_signal",
+    "regular_bearish_hyperwave_signal", "overbought_bearish_hyperwave_signal",
+    "strong_bullish_confluence", "strong_bearish_confluence",
+    "weak_bullish_confluence", "weak_bearish_confluence",
+    "bullish_ob", "bearish_ob",
+    "bullish_bb", "bearish_bb",
+    "bullish_ibos", "bearish_ibos",
+    "bullish_sbos", "bearish_sbos"
+]
 
 def send_telegram_alert(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -31,22 +45,23 @@ def webhook():
 
     signal_name = data["signal"]
     indicator_name = data["indicator"]
+    strength = data.get("strength", 0)  # في حال توفر قوة الإشارة
     timestamp = datetime.utcnow()
 
-    # حفظ الإشارة
-    signals_buffer.append((timestamp, signal_name, indicator_name))
+    # تجاهل الإشارات غير المتابعة
+    if signal_name not in TRACKED_SIGNALS:
+        return {"status": "ignored"}
 
-    # تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
+    # حفظ الإشارة مؤقتاً
+    signals_buffer.append((timestamp, signal_name, indicator_name, strength))
+
+    # تنظيف الإشارات القديمة
     cutoff = datetime.utcnow() - TIME_LIMIT
     signals_buffer[:] = [s for s in signals_buffer if s[0] > cutoff]
 
-    # ✅ الآن الشرط: إذا تحقق إشارتين أو أكثر (من أي مؤشر) خلال 15 دقيقة → يرسل تنبيه
-    if len(signals_buffer) >= 2:
-        unique_signals = {f"{s[1]}-{s[2]}" for s in signals_buffer}
-        if len(unique_signals) >= 2:
-            message = "🚨 LuxAlgo Alert:\nتحققت إشارتين أو أكثر من المؤشرات خلال 15 دقيقة ✅"
-            send_telegram_alert(message)
-            signals_buffer.clear()  # نبدأ من جديد بعد التنبيه
+    # إعداد رسالة التليجرام فورياً عند أي إشارة
+    message = f"🚨 LuxAlgo Alert:\n📊 المؤشر: {indicator_name}\n⚡ الإشارة: {signal_name}\n💪 القوة: {strength}"
+    send_telegram_alert(message)
 
     return {"status": "ok"}
 
