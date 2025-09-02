@@ -26,7 +26,7 @@ def webhook():
     signal = data.get("signal", "NONE")
     oscillator = data.get("oscillator", "NONE")
     price_action = data.get("price_action", "NONE")
-  ticker = data.get("price_action", "NONE")
+  ticker = data.get("ticker", "NONE")
     # 🔹 عد عدد المؤشرات التي ليست NONE
     active_signals = sum(1 for x in [signal, oscillator, price_action] if x != "NONE")
 
