@@ -25,12 +25,17 @@ def send_telegram(message):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global last_bar_time
-    data = request.json
+
+    # تحقق من أن المحتوى JSON
+    if request.is_json:
+        data = request.get_json()
+    else:
+        return {"status": "error", "message": "Content-Type must be application/json"}, 415
 
     # بيانات الإشعار من TradingView Custom Script
-    signal = data.get("signal")          # CALL أو PUT
+    signal = data.get("signal")                # CALL أو PUT
     price = data.get("price")
-    bar_time = data.get("time")          # وقت الشمعة
+    bar_time = data.get("time")                # وقت الشمعة
     layers_confirmed = data.get("layers_confirmed", 0)  # عدد الطبقات المتحققة
 
     # تحقق من تحقق شرطين أو أكثر
