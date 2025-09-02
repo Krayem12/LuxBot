@@ -23,9 +23,9 @@ def webhook():
     data = request.json
 
     # 🔹 استخرج القيم من نص الرسالة
-    signal = data.get("signal", "NONE")
-    oscillator = data.get("oscillator", "NONE")
-    price_action = data.get("price_action", "NONE")
+  bullish = signal_data.get("strong_bullish_confluence") == "true"
+bearish = signal_data.get("strong_bearish_confluence") == "true"
+reversal = signal_data.get("reversal_signal") == "true"
 
     # 🔹 عد عدد المؤشرات التي ليست NONE
     active_signals = sum(1 for x in [signal, oscillator, price_action] if x != "NONE")
