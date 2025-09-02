@@ -22,19 +22,25 @@ def send_telegram(message):
 def webhook():
     data = request.json
 
-    # 🔹 استخرج القيم من نص الرسالة
-  bullish = signal_data.get("strong_bullish_confluence") == "true"
-bearish = signal_data.get("strong_bearish_confluence") == "true"
-reversal = signal_data.get("reversal_signal") == "true"
+    # 🔹 قراءة جميع الـ placeholders الممكنة من LuxAlgo
+    signal = data.get("strong_bullish_confluence", "NONE")   # اقوى إشارة شراء
+    oscillator = data.get("strong_bearish_confluence", "NONE") # اقوى إشارة بيع
+    price_action = data.get("reversal_any_up", "NONE")        # مثال على إشارة price action
 
-    # 🔹 عد عدد المؤشرات التي ليست NONE
-    active_signals = sum(1 for x in [signal, oscillator, price_action] if x != "NONE")
+    # 🔹 عد عدد المؤشرات النشطة
+    active_signals = sum(1 for x in [signal, oscillator, price_action] if x != "NONE" and x != "false")
 
     # 🔹 أرسل رسالة للتليجرام إذا تحقق شرطين أو أكثر
     if active_signals >= 2:
-        msg = f"📊 LuxAlgo Alert:\nSignal: {signal}\nOscillator: {oscillator}\nPrice Action: {price_action}"
+        msg = f"📊 LuxAlgo Alert:\n"
+        if signal != "NONE" and signal != "false":
+            msg += f"💚 Strong Bullish Confluence: {signal}\n"
+        if oscillator != "NONE" and oscillator != "false":
+            msg += f"💔 Strong Bearish Confluence: {oscillator}\n"
+        if price_action != "NONE" and price_action != "false":
+            msg += f"⚡ Price Action Signal: {price_action}\n"
         send_telegram(msg)
-    
+
     return "OK", 200
 
 if __name__ == "__main__":
