@@ -1,6 +1,6 @@
 import time
 from datetime import datetime, timedelta
-from flask import Flask, request
+from flask import Flask, request, render_template_string
 import threading
 import requests
 
@@ -11,7 +11,7 @@ TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
 # 🔹 النوافذ الزمنية
-CONDITION_WINDOW = timedelta(minutes=5)  # تحقق شروط الإشارات
+CONDITION_WINDOW = timedelta(minutes=5)
 REPORT_INTERVAL = 900  # 15 دقيقة للتقرير الدوري
 
 # 🔹 جميع الإشارات المهمة من آخر تحديث LuxAlgo
@@ -104,7 +104,7 @@ def webhook():
             s for s in condition_tracker[ind] if s["timestamp"] > cutoff
         ]
 
-    # 🔹 التحقق من تجمع ثلاث إشارات مختلفة عالية التأكيد
+    # التحقق من إشارات عالية التأكيد
     check_high_confidence_signals()
 
     return {"status": "ok"}
@@ -112,7 +112,6 @@ def webhook():
 # 🔹 التحقق من إشارات عالية التأكيد (ثلاثة مؤشرات متوافقة)
 def check_high_confidence_signals():
     now = datetime.utcnow()
-    # جمع إشارات صالحة ضمن CONDITION_WINDOW
     valid_signals = []
     for indicator, signals in condition_tracker.items():
         for s in signals:
@@ -125,8 +124,6 @@ def check_high_confidence_signals():
                     "timestamp": s["timestamp"],
                     "ref": s
                 })
-
-    # البحث عن تجمع ثلاث إشارات متوافقة
     for signal_type in ["bullish", "bearish"]:
         matches = [s for s in valid_signals if s["type"] == signal_type]
         if len(matches) >= 3:
@@ -134,7 +131,6 @@ def check_high_confidence_signals():
             message = f"🔥 تنبيه قوي {signal_type.upper()} على المؤشرات: {indicators_list}!\n"
             message += "\n".join([f"{s['indicator']} -> {s['signal']} ⏱ {s['timestamp'].strftime('%H:%M:%S')}" for s in matches[:3]])
             send_telegram_alert(message)
-            # وضع علامة على الإشارات المرسلة
             for s in matches[:3]:
                 s["ref"]["sent"] = True
 
@@ -153,6 +149,60 @@ def periodic_report():
                     message_lines.append(f" • {s['signal']} ⏱ {s['timestamp'].strftime('%H:%M:%S')} [{ph_text}]")
         if len(message_lines) > 1:
             send_telegram_alert("\n".join(message_lines))
+
+# 🔹 واجهة ويب لعرض الإشارات
+@app.route('/')
+def dashboard():
+    html_template = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>LuxAlgo Dashboard</title>
+        <meta http-equiv="refresh" content="10">
+        <style>
+            body { font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #4CAF50; color: white; }
+            tr:nth-child(even){background-color: #f2f2f2;}
+            .bullish { color: green; font-weight: bold; }
+            .bearish { color: red; font-weight: bold; }
+            .sent { background-color: #d3d3d3; }
+        </style>
+    </head>
+    <body>
+        <h1>LuxAlgo Dashboard</h1>
+        {% for indicator, signals in condition_tracker.items() %}
+            <h2>{{ indicator }}</h2>
+            <table>
+                <tr>
+                    <th>Signal</th>
+                    <th>Type</th>
+                    <th>Time</th>
+                    <th>Sent</th>
+                    <th>Placeholders</th>
+                </tr>
+                {% for s in signals %}
+                    <tr class="{{ 'sent' if s.sent else '' }}">
+                        <td>{{ s.signal }}</td>
+                        <td class="{{ s.type }}">{{ s.type or 'N/A' }}</td>
+                        <td>{{ s.timestamp.strftime('%H:%M:%S') }}</td>
+                        <td>{{ s.sent }}</td>
+                        <td>{{ s.placeholders }}</td>
+                    </tr>
+                {% endfor %}
+            </table>
+        {% endfor %}
+    </body>
+    </html>
+    """
+    # تحويل condition_tracker إلى قائمة من الكائنات للوصول في Jinja2
+    tracker_copy = {}
+    for k, v in condition_tracker.items():
+        tracker_copy[k] = []
+        for s in v:
+            tracker_copy[k].append(type('obj', (object,), s))
+    return render_template_string(html_template, condition_tracker=tracker_copy)
 
 if __name__ == '__main__':
     # تشغيل تقرير دوري
