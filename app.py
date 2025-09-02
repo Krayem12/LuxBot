@@ -14,7 +14,7 @@ def send_telegram(message):
     requests.post(url, data=data)
 
 # 🔹 دالة للتحقق من الإشارات
-def check_signal(data, min_confirmed=2):
+def check_signal(data, min_confirmed=1):
     layers_confirmed = 0
     details = []
 
