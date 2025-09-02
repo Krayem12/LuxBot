@@ -47,7 +47,7 @@ def webhook():
         layers_confirmed = 0
 
     # تحقق من تحقق شرطين أو أكثر
-    if layers_confirmed < 2:
+    if layers_confirmed < 1:
         return {"status": "skipped_not_enough_layers"}, 200
 
     # تجاهل إشعارات نفس الشمعة
