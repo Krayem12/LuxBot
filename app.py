@@ -1,49 +1,161 @@
+import time
+from datetime import datetime, timedelta
 from flask import Flask, request
+import threading
 import requests
 
 app = Flask(__name__)
 
-# 🔹 بيانات التليجرام
+# 🔹 بيانات التوكن والـ ID للتليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# 🔹 إرسال رسالة للتليجرام
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
-    requests.post(url, data=payload)
+# 🔹 النوافذ الزمنية
+CONDITION_WINDOW = timedelta(minutes=5)  # تحقق شروط الإشارات
+REPORT_INTERVAL = 900  # 15 دقيقة للتقرير الدوري
 
-# 🔹 Webhook endpoint لاستقبال إشعارات TradingView
-@app.route("/webhook", methods=["POST"])
+# 🔹 جميع الإشارات المهمة من آخر تحديث LuxAlgo
+TRACKED_SIGNALS = [
+    "bullish_confirmation", "bearish_confirmation",
+    "bullish_contrarian", "bearish_contrarian",
+    "regular_bullish_hyperwave_signal", "regular_bearish_hyperwave_signal",
+    "oversold_bullish_hyperwave_signal", "overbought_bearish_hyperwave_signal",
+    "strong_bullish_confluence", "strong_bearish_confluence",
+    "weak_bullish_confluence", "weak_bearish_confluence",
+    "bullish_ob", "bearish_ob",
+    "bullish_bb", "bearish_bb",
+    "bullish_ibos", "bearish_ibos",
+    "bullish_sbos", "bearish_sbos"
+]
+
+PLACEHOLDER_FIELDS = [
+    "open", "high", "low", "close", "hl2", "ohlc4", "hlc3", "hlcc4",
+    "volume", "range", "tr",
+    "barindex", "last_barindex", "second", "minute", "hour", "dayofweek",
+    "dayofmonth", "weekofyear", "month", "year", "unix_ts", "timeframe",
+    "custom_alert_step", "custom_alert_or", "step", "barssince_step", "invalidated",
+    "external1", "external2", "external3", "external4", "external5"
+]
+
+# 🔹 تخزين جميع الإشارات
+condition_tracker = {}
+
+# 🔹 إرسال رسالة للتليجرام
+def send_telegram_alert(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        print("خطأ في إرسال الرسالة:", e)
+
+# 🔹 التحقق من شروط الإشارة (قابلة للتخصيص)
+def check_conditions(signal, placeholders):
+    strength = placeholders.get("strength", 0)
+    close = placeholders.get("close", 0)
+    hl2 = placeholders.get("hl2", 0)
+    
+    bullish_conditions = [
+        signal in ["bullish_confirmation", "bullish_contrarian", "strong_bullish_confluence"],
+        strength >= 50,
+        close > hl2
+    ]
+    
+    bearish_conditions = [
+        signal in ["bearish_confirmation", "bearish_contrarian", "strong_bearish_confluence"],
+        strength >= 50,
+        close < hl2
+    ]
+    
+    return all(bullish_conditions), all(bearish_conditions)
+
+# 🔹 استقبال الـ webhook
+@app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json
+    if not data or "signal" not in data or "indicator" not in data:
+        return {"status": "error", "msg": "بيانات غير صحيحة"}, 400
 
-    # 🔹 قراءة الإشارات من LuxAlgo
-    bullish = data.get("strong_bullish_confluence", "false")  # ارتفاع
-    bearish = data.get("strong_bearish_confluence", "false")  # هبوط
-    reversal_up = data.get("reversal_any_up", "false")         # إشارة صعود
-    reversal_down = data.get("reversal_any_down", "false")     # إشارة هبوط
+    signal_name = data["signal"]
+    indicator_name = data["indicator"]
+    timestamp = datetime.utcnow()
+    
+    placeholders = {k: data.get(k, 0) for k in PLACEHOLDER_FIELDS}
+    placeholders["strength"] = data.get("strength", 0)
 
-    # 🔹 تحديد نوع الإشارة
-    active_signals = 0
-    message = "📊 LuxAlgo Alert:\n"
+    if signal_name not in TRACKED_SIGNALS:
+        return {"status": "ignored"}
 
-    if bullish == "true" or reversal_up == "true":
-        active_signals += 1
-        message += "💚 Signal: CALL\n"
-    if bearish == "true" or reversal_down == "true":
-        active_signals += 1
-        message += "💔 Signal: PUT\n"
+    if indicator_name not in condition_tracker:
+        condition_tracker[indicator_name] = []
 
-    # 🔹 أرسل رسالة إذا تحقق شرطين أو أكثر
-    if active_signals >= 2:
-        send_telegram(message)
+    # إضافة الإشارة الجديدة
+    condition_tracker[indicator_name].append({
+        "timestamp": timestamp,
+        "signal": signal_name,
+        "placeholders": placeholders,
+        "sent": False
+    })
 
-    return "OK", 200
+    # تنظيف الإشارات القديمة
+    cutoff = datetime.utcnow() - CONDITION_WINDOW
+    for ind in condition_tracker:
+        condition_tracker[ind] = [
+            s for s in condition_tracker[ind] if s["timestamp"] > cutoff
+        ]
 
-if __name__ == "__main__":
+    # 🔹 التحقق من تجمع ثلاث إشارات مختلفة عالية التأكيد
+    check_high_confidence_signals()
+
+    return {"status": "ok"}
+
+# 🔹 التحقق من إشارات عالية التأكيد (ثلاثة مؤشرات متوافقة)
+def check_high_confidence_signals():
+    now = datetime.utcnow()
+    # جمع إشارات صالحة ضمن CONDITION_WINDOW
+    valid_signals = []
+    for indicator, signals in condition_tracker.items():
+        for s in signals:
+            if not s["sent"] and now - s["timestamp"] <= CONDITION_WINDOW:
+                bullish, bearish = check_conditions(s["signal"], s["placeholders"])
+                valid_signals.append({
+                    "indicator": indicator,
+                    "signal": s["signal"],
+                    "type": "bullish" if bullish else "bearish" if bearish else None,
+                    "timestamp": s["timestamp"],
+                    "ref": s
+                })
+
+    # البحث عن تجمع ثلاث إشارات متوافقة
+    for signal_type in ["bullish", "bearish"]:
+        matches = [s for s in valid_signals if s["type"] == signal_type]
+        if len(matches) >= 3:
+            indicators_list = ", ".join([s["indicator"] for s in matches[:3]])
+            message = f"🔥 تنبيه قوي {signal_type.upper()} على المؤشرات: {indicators_list}!\n"
+            message += "\n".join([f"{s['indicator']} -> {s['signal']} ⏱ {s['timestamp'].strftime('%H:%M:%S')}" for s in matches[:3]])
+            send_telegram_alert(message)
+            # وضع علامة على الإشارات المرسلة
+            for s in matches[:3]:
+                s["ref"]["sent"] = True
+
+# 🔹 تقرير دوري كل 15 دقيقة
+def periodic_report():
+    while True:
+        time.sleep(REPORT_INTERVAL)
+        now = datetime.utcnow()
+        message_lines = ["🚨 <b>LuxAlgo Signals Report (آخر 15 دقيقة)</b>"]
+        for indicator, signals in condition_tracker.items():
+            recent = [s for s in signals if now - s["timestamp"] <= CONDITION_WINDOW]
+            if recent:
+                message_lines.append(f"\n📊 <b>{indicator}</b>")
+                for s in recent:
+                    ph_text = ", ".join([f"{k}: {v}" for k, v in s["placeholders"].items()])
+                    message_lines.append(f" • {s['signal']} ⏱ {s['timestamp'].strftime('%H:%M:%S')} [{ph_text}]")
+        if len(message_lines) > 1:
+            send_telegram_alert("\n".join(message_lines))
+
+if __name__ == '__main__':
+    # تشغيل تقرير دوري
+    report_thread = threading.Thread(target=periodic_report, daemon=True)
+    report_thread.start()
     app.run(host="0.0.0.0", port=5000)
