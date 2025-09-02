@@ -1,44 +1,42 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import requests
 
 app = Flask(__name__)
 
-# 🔹 بيانات التليجرام
+# 🔹 بيانات التليقرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# 🔹 دالة إرسال رسالة للتليجرام
+# 🔹 إرسال رسالة للتليقرام
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message
-    }
-    try:
-        response = requests.post(url, json=payload)
-        print("Telegram response:", response.text)
-    except Exception as e:
-        print("Error sending telegram:", e)
+    payload = {"chat_id": CHAT_ID, "text": message}
+    requests.post(url, json=payload)
 
-# 🔹 نقطة استقبال Webhook
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    try:
-        data = request.json
-        print("Incoming JSON:", data)  # ✅ لطباعة كل الرسائل في اللوق
+    data = request.json
 
-        if not data:
-            return jsonify({"status": "error", "message": "No JSON received"}), 400
+    # ✅ استخراج إشارات LuxAlgo
+    signal = data.get("signal", False)          # مثال: True إذا كول أو بوت
+    oscillator = data.get("oscillator", False)
+    price_action = data.get("price_action", False)
 
-        # 🔹 إرسال كل رسالة مباشرة لتليجرام
-        send_telegram(f"Raw Alert: {data}")
+    # تحويل القيم النصية أو Boolean
+    layers_confirmed = sum([bool(signal), bool(oscillator), bool(price_action)])
 
-        return jsonify({"status": "success"}), 200
+    # 🔹 تحقق شرطين أو أكثر
+    if layers_confirmed >= 2:
+        message = ""
+        if signal:
+            message += "كول " if signal == "call" else "بوت "
+        if oscillator:
+            message += "كول " if oscillator == "call" else "بوت "
+        if price_action:
+            message += "كول " if price_action == "call" else "بوت "
+        send_telegram(message.strip())
 
-    except Exception as e:
-        print("Error:", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
+    return {"status": "ok"}, 200
 
-# 🔹 تشغيل السيرفر
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
