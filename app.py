@@ -1,47 +1,51 @@
 from flask import Flask, request
 import requests
-import json
 
 app = Flask(__name__)
 
-# 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# 🔹 إرسال رسالة للتليجرام
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
-    try:
-        response = requests.post(url, json=payload)
-        print("Telegram response:", response.text)
-    except Exception as e:
-        print("Telegram error:", e)
+    requests.post(url, json=payload)
 
-# 🔹 Webhook
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
-    try:
-        if request.is_json:
-            data = request.get_json()
-        else:
-            raw_data = request.data.decode('utf-8')
-            try:
-                data = json.loads(raw_data)
-            except:
-                data = {"signal": raw_data}
+    data = request.json or {}
+    bullish_count = 0
+    bearish_count = 0
 
-        print("📩 Received Webhook:", data)
+    # === LuxAlgo Signal & Overlays ===
+    if str(data.get("bullish_confirmation+")) == "True":
+        bullish_count += 1
+    if str(data.get("bearish_confirmation+")) == "True":
+        bearish_count += 1
 
-        # نرسل نفس النص بدون أي تعديل
-        signal = data.get("signal", "unknown")
-        send_telegram(f"🚨 LuxAlgo Signal: {signal}")
+    # === Oscillator Matrix ===
+    if str(data.get("regular_bullish_hyperwave_signal")) == "True":
+        bullish_count += 1
+    if str(data.get("regular_bearish_hyperwave_signal")) == "True":
+        bearish_count += 1
 
-        return {"status": "ok"}, 200
-    except Exception as e:
-        print("❌ Error:", e)
-        return {"status": "error", "message": str(e)}, 500
+    # === Price Action Concepts ===
+    if str(data.get("bullish_ichoch")) == "True":
+        bullish_count += 1
+    if str(data.get("bearish_ichoch")) == "True":
+        bearish_count += 1
 
+    # إرسال إشعار فقط إذا تحقق شرطين أو أكثر
+    message = ""
+    if bullish_count >= 2:
+        message = f"{data.get('ticker','')} CALL"
+    elif bearish_count >= 2:
+        message = f"{data.get('ticker','')} PUT"
+
+    if message:
+        send_telegram(message)
+
+    return "ok", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
