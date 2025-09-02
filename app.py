@@ -1,42 +1,22 @@
-from flask import Flask, request
-import requests
-
-app = Flask(__name__)
-
-# 🔹 بيانات التليجرام
-TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
-CHAT_ID = "624881400"
-
-# 🔹 تخزين آخر شمعة لتجنب التكرار
-last_bar_time = None
-
-# 🔹 إرسال رسالة للتليجرام
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
-    try:
-        response = requests.post(url, data=payload)
-        if response.status_code != 200:
-            print(f"خطأ في إرسال التليجرام: {response.text}")
-    except Exception as e:
-        print(f"حدث خطأ: {e}")
-
-# 🔹 استقبال POST من TradingView
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global last_bar_time
 
-    # تحقق من أن المحتوى JSON
     if request.is_json:
         data = request.get_json()
     else:
         return {"status": "error", "message": "Content-Type must be application/json"}, 415
 
-    # بيانات الإشعار من TradingView Custom Script
-    signal = data.get("signal")                # CALL أو PUT
+    signal = data.get("signal")
     price = data.get("price")
-    bar_time = data.get("time")                # وقت الشمعة
-    layers_confirmed = data.get("layers_confirmed", 0)  # عدد الطبقات المتحققة
+    bar_time = data.get("time")
+    layers_confirmed = data.get("layers_confirmed", 0)
+
+    # تحويل layers_confirmed إلى رقم
+    try:
+        layers_confirmed = int(layers_confirmed)
+    except (ValueError, TypeError):
+        layers_confirmed = 0
 
     # تحقق من تحقق شرطين أو أكثر
     if layers_confirmed < 2:
@@ -47,14 +27,8 @@ def webhook():
         return {"status": "skipped_duplicate"}, 200
     last_bar_time = bar_time
 
-    # تحويل CALL/PUT إلى كول/بوت
     signal_text = "كول" if signal == "CALL" else "بوت" if signal == "PUT" else signal
-
     message = f"📊 إشارة {signal_text}\nالسعر: {price}\nالوقت: {bar_time}"
     send_telegram(message)
 
     return {"status": "ok"}, 200
-
-# 🔹 تشغيل السيرفر
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
