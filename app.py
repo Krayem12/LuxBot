@@ -1,54 +1,55 @@
-import time
-from datetime import datetime, timedelta
 from flask import Flask, request
 import requests
 
 app = Flask(__name__)
 
-# ✅ بيانات التوكن والـ ID للتليجرام
+# 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# نخزن الإشارات الواردة مؤقتاً
-signals_buffer = []
+# 🔹 تخزين آخر شمعة لتجنب التكرار
+last_bar_time = None
 
-# المدة الزمنية للفحص (15 دقيقة)
-TIME_LIMIT = timedelta(minutes=15)
-
-def send_telegram_alert(message):
+# 🔹 إرسال رسالة للتليجرام
+def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
     try:
-        requests.post(url, json=payload)
+        response = requests.post(url, data=payload)
+        if response.status_code != 200:
+            print(f"خطأ في إرسال التليجرام: {response.text}")
     except Exception as e:
-        print("خطأ في إرسال الرسالة:", e)
+        print(f"حدث خطأ: {e}")
 
-@app.route('/webhook', methods=['POST'])
+# 🔹 استقبال POST من TradingView
+@app.route("/webhook", methods=["POST"])
 def webhook():
+    global last_bar_time
     data = request.json
-    if not data or "signal" not in data or "indicator" not in data:
-        return {"status": "error", "msg": "بيانات غير صحيحة"}, 400
 
-    signal_name = data["signal"]
-    indicator_name = data["indicator"]
-    timestamp = datetime.utcnow()
+    # بيانات الإشعار من TradingView Custom Script
+    signal = data.get("signal")          # CALL أو PUT
+    price = data.get("price")
+    bar_time = data.get("time")          # وقت الشمعة
+    layers_confirmed = data.get("layers_confirmed", 0)  # عدد الطبقات المتحققة
 
-    # حفظ الإشارة
-    signals_buffer.append((timestamp, signal_name, indicator_name))
+    # تحقق من تحقق شرطين أو أكثر
+    if layers_confirmed < 2:
+        return {"status": "skipped_not_enough_layers"}, 200
 
-    # تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
-    cutoff = datetime.utcnow() - TIME_LIMIT
-    signals_buffer[:] = [s for s in signals_buffer if s[0] > cutoff]
+    # تجاهل إشعارات نفس الشمعة
+    if bar_time == last_bar_time:
+        return {"status": "skipped_duplicate"}, 200
+    last_bar_time = bar_time
 
-    # ✅ الآن الشرط: إذا تحقق إشارتين أو أكثر (من أي مؤشر) خلال 15 دقيقة → يرسل تنبيه
-    if len(signals_buffer) >= 2:
-        unique_signals = {f"{s[1]}-{s[2]}" for s in signals_buffer}
-        if len(unique_signals) >= 2:
-            message = "🚨 LuxAlgo Alert:\nتحققت إشارتين أو أكثر من المؤشرات خلال 15 دقيقة ✅"
-            send_telegram_alert(message)
-            signals_buffer.clear()  # نبدأ من جديد بعد التنبيه
+    # تحويل CALL/PUT إلى كول/بوت
+    signal_text = "كول" if signal == "CALL" else "بوت" if signal == "PUT" else signal
 
-    return {"status": "ok"}
+    message = f"📊 إشارة {signal_text}\nالسعر: {price}\nالوقت: {bar_time}"
+    send_telegram(message)
 
-if __name__ == '__main__':
+    return {"status": "ok"}, 200
+
+# 🔹 تشغيل السيرفر
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
