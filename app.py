@@ -3,47 +3,35 @@ import requests
 
 app = Flask(__name__)
 
-# ====== بيانات التليجرام ======
+# 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# ====== دالة إرسال الرسائل ======
+# 🔹 دالة إرسال رسالة للتليجرام
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
-    requests.post(url, data=payload)
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message
+    }
+    try:
+        response = requests.post(url, json=payload)
+        print("Telegram response:", response.text)
+    except Exception as e:
+        print("Error sending telegram:", e)
 
-# ====== Webhook endpoint ======
+# 🔹 نقطة استقبال Webhook
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
         data = request.json
+        print("Incoming JSON:", data)  # ✅ لطباعة كل الرسائل في اللوق
+
         if not data:
             return jsonify({"status": "error", "message": "No JSON received"}), 400
 
-        # ====== عداد الطبقات ======
-        bullish_count = sum([
-            data.get("bullish_confirmation") is True,
-            data.get("regular_bullish_hyperwave_signal") is True,
-            data.get("bullish_ichoch") is True
-        ])
-
-        bearish_count = sum([
-            data.get("bearish_confirmation") is True,
-            data.get("regular_bearish_hyperwave_signal") is True,
-            data.get("bearish_ichoch") is True
-        ])
-
-        # ====== تحقق من شرطين أو أكثر ======
-        message = ""
-        if bullish_count >= 2:
-            message = "Call"
-        elif bearish_count >= 2:
-            message = "Put"
-
-        if message:
-            symbol = data.get("symbol", "Unknown")
-            send_telegram(f"LuxAlgo Signal: {symbol} -> {message}")
+        # 🔹 إرسال كل رسالة مباشرة لتليجرام
+        send_telegram(f"Raw Alert: {data}")
 
         return jsonify({"status": "success"}), 200
 
@@ -51,6 +39,6 @@ def webhook():
         print("Error:", e)
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# ====== تشغيل السيرفر ======
+# 🔹 تشغيل السيرفر
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
