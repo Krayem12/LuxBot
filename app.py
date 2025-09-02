@@ -1,5 +1,4 @@
 import time
-import threading
 from datetime import datetime, timedelta
 from flask import Flask, request
 import requests
@@ -54,24 +53,29 @@ def check_high_confidence():
 def webhook():
     data = request.json
     print("Received webhook:", data)
-    if not data or "signal" not in data or "indicator" not in data:
+
+    if not data or "alerts" not in data:
         return {"status": "error", "msg": "بيانات غير صحيحة"}, 400
 
-    signal_name = data["signal"]
-    indicator_name = data["indicator"]
-    strength = data.get("strength", 0)
-    timestamp = datetime.utcnow()
-    placeholders = {k: data.get(k, "") for k in ["close", "hl2"]}
+    for alert in data["alerts"]:
+        signal_name = alert.get("signal")
+        indicator_name = alert.get("indicator")
+        strength = alert.get("strength", 0)
+        timestamp = datetime.utcnow()
+        placeholders = {k: alert.get(k, "") for k in ["close", "hl2"]}
 
-    # حفظ الإشارة
-    condition_tracker.setdefault(indicator_name, []).append({
-        "timestamp": timestamp,
-        "signal": signal_name,
-        "indicator": indicator_name,
-        "strength": strength,
-        "placeholders": placeholders,
-        "sent": False
-    })
+        if not signal_name or not indicator_name:
+            continue
+
+        # حفظ الإشارة
+        condition_tracker.setdefault(indicator_name, []).append({
+            "timestamp": timestamp,
+            "signal": signal_name,
+            "indicator": indicator_name,
+            "strength": strength,
+            "placeholders": placeholders,
+            "sent": False
+        })
 
     # تنظيف الإشارات القديمة
     cutoff = datetime.utcnow() - CONDITION_WINDOW
