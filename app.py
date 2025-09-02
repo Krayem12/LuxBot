@@ -3,40 +3,59 @@ import requests
 
 app = Flask(__name__)
 
-# 🔹 بيانات التليقرام
+# 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# 🔹 إرسال رسالة للتليقرام
+# 🔹 دالة إرسال رسالة للتليجرام
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
-    requests.post(url, json=payload)
+    data = {"chat_id": CHAT_ID, "text": message}
+    requests.post(url, data=data)
 
+# 🔹 دالة للتحقق من الإشارات
+def check_signal(data, min_confirmed=2):
+    layers_confirmed = 0
+    details = []
+
+    # bullish signals
+    if data.get("signal") == "bullish":
+        layers_confirmed += 1
+        details.append("Signal: Bullish")
+    if data.get("oscillator") == "bullish":
+        layers_confirmed += 1
+        details.append("Oscillator: Bullish")
+    if data.get("price_action") == "bullish":
+        layers_confirmed += 1
+        details.append("Price Action: Bullish")
+
+    # bearish signals
+    if data.get("signal") == "bearish":
+        layers_confirmed += 1
+        details.append("Signal: Bearish")
+    if data.get("oscillator") == "bearish":
+        layers_confirmed += 1
+        details.append("Oscillator: Bearish")
+    if data.get("price_action") == "bearish":
+        layers_confirmed += 1
+        details.append("Price Action: Bearish")
+
+    return layers_confirmed >= min_confirmed, details
+
+# 🔹 Webhook endpoint
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
+    if not data:
+        return {"status": "error", "message": "No JSON received"}, 400
 
-    # ✅ استخراج إشارات LuxAlgo
-    signal = data.get("signal", False)          # مثال: True إذا كول أو بوت
-    oscillator = data.get("oscillator", False)
-    price_action = data.get("price_action", False)
+    confirmed, details = check_signal(data)
+    if confirmed:
+        message = "LuxAlgo Alert:\n" + "\n".join(details)
+        send_telegram(message)
+        return {"status": "success", "message": "Telegram alert sent"}, 200
 
-    # تحويل القيم النصية أو Boolean
-    layers_confirmed = sum([bool(signal), bool(oscillator), bool(price_action)])
-
-    # 🔹 تحقق شرطين أو أكثر
-    if layers_confirmed >= 2:
-        message = ""
-        if signal:
-            message += "كول " if signal == "call" else "بوت "
-        if oscillator:
-            message += "كول " if oscillator == "call" else "بوت "
-        if price_action:
-            message += "كول " if price_action == "call" else "بوت "
-        send_telegram(message.strip())
-
-    return {"status": "ok"}, 200
+    return {"status": "ignored", "message": "Conditions not met"}, 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
