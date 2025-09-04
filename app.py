@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 # 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
@@ -16,6 +16,7 @@ def send_telegram(message):
     except Exception as e:
         print("خطأ أثناء إرسال التليجرام:", e)
 
+# إرسال POST خارجي
 def send_post_request(message, indicators):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     payload = {
@@ -44,7 +45,7 @@ def process_alerts(alerts):
     if len(indicators_triggered) >= 2:
         indicators_list = " + ".join(indicators_triggered)
         telegram_message = f"CALL 🚀 ({len(indicators_triggered)} Confirmed Signals)\n📊 Indicators: {indicators_list}"
-        send_post_request(telegram_message,indicator)
+        send_post_request(telegram_message, indicators_list)  # صححت هنا
         send_telegram(telegram_message)
         return True
     return False
@@ -70,5 +71,5 @@ def webhook():
         print("Error:", e)
         return jsonify({"status": "error", "message": str(e)}), 400
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
