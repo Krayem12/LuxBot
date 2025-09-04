@@ -16,7 +16,7 @@ def send_telegram(message):
     except Exception as e:
         print("خطأ أثناء إرسال التليجرام:", e)
 
-# ✅ إرسال POST خارجي (لا نحذفه)
+# ✅ إرسال POST خارجي
 def send_post_request(message, indicators):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     payload = {
@@ -30,14 +30,13 @@ def send_post_request(message, indicators):
     except Exception as e:
         print("خطأ أثناء إرسال POST:", e)
 
-
-# ✅ معالجة التنبيهات
+# ✅ معالجة التنبيهات JSON
 def process_alerts(alerts):
     indicators_triggered = []
 
     for alert in alerts:
         indicator = alert.get("indicator", "")
-        message = alert.get("signal", "")
+        message = alert.get("message", "")
 
         if message == "CALL":
             indicators_triggered.append(indicator)
@@ -50,19 +49,24 @@ def process_alerts(alerts):
         return True
     return False
 
-
 # ✅ استقبال الويب هوك
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # نحاول نفك JSON
+        # نحاول فك JSON أولاً
         data = request.get_json(force=True, silent=True)
 
-        if not data:
-            raw = request.data.decode("utf-8")
+        if not data:  
+            # رسالة نصية خام
+            raw = request.data.decode("utf-8").strip()
             print("⚠️ Received raw webhook:", raw)
-            return jsonify({"status": "invalid_json", "raw": raw}), 400
 
+            # إرسال للتليجرام مباشرة
+            send_telegram(f"📢 Alert: {raw}")
+
+            return jsonify({"status": "raw_alert_sent", "message": raw}), 200
+
+        # إذا JSON
         print("✅ Received webhook JSON:", data)
 
         alerts = data.get("alerts", [])
@@ -79,9 +83,5 @@ def webhook():
         print("❌ Error:", e)
         return jsonify({"status": "error", "message": str(e)}), 400
 
-
 if __name__ == "__main__":
-    # Render يتطلب 0.0.0.0 + PORT
-    import os
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
