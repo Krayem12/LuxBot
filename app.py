@@ -16,7 +16,7 @@ def send_telegram(message):
     except Exception as e:
         print("خطأ أثناء إرسال التليجرام:", e)
 
-# ✅ إرسال POST خارجي (لا تلغيه)
+# ✅ إرسال POST خارجي (لا نحذفه)
 def send_post_request(message, indicators):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     payload = {
@@ -30,13 +30,14 @@ def send_post_request(message, indicators):
     except Exception as e:
         print("خطأ أثناء إرسال POST:", e)
 
+
 # ✅ معالجة التنبيهات
 def process_alerts(alerts):
     indicators_triggered = []
 
     for alert in alerts:
         indicator = alert.get("indicator", "")
-        message = alert.get("message", "")
+        message = alert.get("signal", "")
 
         if message == "CALL":
             indicators_triggered.append(indicator)
@@ -49,12 +50,20 @@ def process_alerts(alerts):
         return True
     return False
 
+
 # ✅ استقبال الويب هوك
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        data = request.get_json(force=True)
-        print("Received webhook:", data)
+        # نحاول نفك JSON
+        data = request.get_json(force=True, silent=True)
+
+        if not data:
+            raw = request.data.decode("utf-8")
+            print("⚠️ Received raw webhook:", raw)
+            return jsonify({"status": "invalid_json", "raw": raw}), 400
+
+        print("✅ Received webhook JSON:", data)
 
         alerts = data.get("alerts", [])
         if alerts:
@@ -67,11 +76,12 @@ def webhook():
             return jsonify({"status": "no_alerts"}), 400
 
     except Exception as e:
-        print("Error:", e)
+        print("❌ Error:", e)
         return jsonify({"status": "error", "message": str(e)}), 400
 
-# ✅ للتأكد أن Render يستخدم البورت الصحيح
+
 if __name__ == "__main__":
+    # Render يتطلب 0.0.0.0 + PORT
     import os
-    port = int(os.environ.get("PORT", 10000))  # Render يستخدم PORT
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
