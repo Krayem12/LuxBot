@@ -61,7 +61,7 @@ def webhook():
         # معالجة كل التنبيهات
         for alert in alerts:
             indicator = alert.get("indicator", "N/A")
-           # signal = alert.get("signal", "N/A")
+            signal = alert.get("signal", "N/A")
             message = alert.get("message", "N/A")
             ticker = alert.get("ticker", "N/A")
             open_price = alert.get("open", "N/A")
@@ -75,7 +75,7 @@ def webhook():
             minute = alert.get("minute", "N/A")
 
             telegram_message = (
-            #    f"🚨 Signal Alert\n"
+                f"🚨 Signal Alert\n"
                 f"🔹 Ticker: {ticker}\n"
                 f"🔹 Indicator: {indicator}\n"
                 f"🔹 Signal: {signal}\n"
