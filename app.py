@@ -75,7 +75,7 @@ def webhook():
             minute = alert.get("minute", "N/A")
 
             telegram_message = (
-                f"🚨 Signal Alert\n"
+            #    f"🚨 Signal Alert\n"
                 f"🔹 Ticker: {ticker}\n"
                 f"🔹 Indicator: {indicator}\n"
                 f"🔹 Signal: {signal}\n"
