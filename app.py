@@ -1,8 +1,9 @@
+
 from flask import Flask, request, jsonify
 import requests
 import os
 
-app = Flask(__name__)
+app = Flask(_name_)
 
 # 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
@@ -85,9 +86,10 @@ def webhook():
                 f"🔹 Barcolor: {barcolor}\n"
                 f"🔹 Bar Index: {bar_index} | Time: {hour}:{minute}"
             )
+            
 
             # إرسال للـ POST الخارجي
-            send_post_request(telegram_message, indicator)
+            send_post_request(message, alerts)
 
             # إرسال للتليجرام
             send_telegram(telegram_message)
@@ -99,6 +101,6 @@ def webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # ✅ تشغيل التطبيق مع المنفذ المرن
-if __name__ == "__main__":
+if _name_ == "_main_":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
