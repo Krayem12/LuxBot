@@ -1,13 +1,15 @@
 from flask import Flask, request, jsonify
 import requests
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# ✅ إرسال رسالة للتليجرام
+last_trigger_time = None
+triggered_signals = []
+
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
@@ -16,7 +18,6 @@ def send_telegram(message):
     except Exception as e:
         print("خطأ أثناء إرسال التليجرام:", e)
 
-# 🔹 إرسال POST خارجي
 def send_post_request(message, indicators):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     payload = {
@@ -30,51 +31,71 @@ def send_post_request(message, indicators):
     except Exception as e:
         print("خطأ أثناء إرسال POST:", e)
 
-# ✅ معالجة التنبيهات
 def process_alerts(alerts):
-    indicators_triggered = []
+    global last_trigger_time, triggered_signals
+    now = datetime.utcnow()
+
+    if last_trigger_time is None or (now - last_trigger_time) > timedelta(minutes=15):
+        triggered_signals = []
+        last_trigger_time = now
+
+    strongest_signals = {
+        "Signals & Overlays": ["bullish_confirmation+", "bearish_confirmation+", "bullish_contrarian+", "bearish_contrarian+"],
+        "Price Action Concepts": ["bullish_ichoch+", "bearish_ichoch+", "bullish_ibos", "bearish_ibos", "bullish_ob", "bearish_ob"],
+        "Oscillator Matrix": ["strong_bullish_confluence", "strong_bearish_confluence", "regular_bullish_hyperwave_signal", "regular_bearish_hyperwave_signal"]
+    }
+
+    signal_icons = {
+        "Signals & Overlays": "🔵",
+        "Price Action Concepts": "🟢",
+        "Oscillator Matrix": "⚡"
+    }
+
+    new_signals = []
 
     for alert in alerts:
-        indicator = alert.get("indicator", "Unknown")
-        message = alert.get("message", alert.get("signal", "Raw Signal"))
+        indicator_type = alert.get("indicator", "")
+        signal = alert.get("signal", "")
 
-        indicators_triggered.append(indicator)
+        if indicator_type in strongest_signals:
+            for sig in strongest_signals[indicator_type]:
+                if sig in signal:
+                    new_signals.append(f"{signal_icons[indicator_type]} {indicator_type}: {sig}")
 
-    if indicators_triggered:
-        indicators_list = " + ".join(indicators_triggered)
-        telegram_message = f"Alert 🚀 ({len(indicators_triggered)} Signals)\n📊 Indicators: {indicators_list}\n💬 Messages: {', '.join([a.get('message', a.get('signal', '')) for a in alerts])}"
-        send_post_request(telegram_message, indicators_list)
+    triggered_signals += new_signals
+    triggered_signals = list(set(triggered_signals))
+
+    indicators_present = set(sig.split(":")[0].strip() for sig in triggered_signals)
+    if len(indicators_present) >= 2:
+        signals_list = "\n".join(triggered_signals)
+        telegram_message = f"🚀 LuxAlgo Alert ({len(triggered_signals)} Confirmed Signals)\n📊 Signals:\n{signals_list}"
+        send_post_request(telegram_message, signals_list)
         send_telegram(telegram_message)
+        last_trigger_time = now
+        triggered_signals = []
         return True
+
     return False
 
-# ✅ استقبال الويب هوك
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        alerts = []
+        data = request.get_json(force=True)
+        print("Received webhook:", data)
 
-        # JSON
-        if request.is_json:
-            data = request.get_json(force=True)
-            print("Received JSON webhook:", data)
-            alerts = data.get("alerts", [])
-        else:
-            # نص خام
-            raw = request.data.decode("utf-8").strip()
-            print("Received raw webhook:", raw)
-            if raw:
-                alerts = [{"signal": raw, "indicator": "Raw Text", "message": raw}]
-
+        alerts = data.get("alerts", [])
         if alerts:
-            process_alerts(alerts)
-            return jsonify({"status": "alert_sent"}), 200
+            triggered = process_alerts(alerts)
+            if triggered:
+                return jsonify({"status": "alert_sent"}), 200
+            else:
+                return jsonify({"status": "not_enough_signals"}), 200
         else:
-            return jsonify({"status": "no_alerts"}), 200
+            return jsonify({"status": "no_alerts"}), 400
 
     except Exception as e:
         print("Error:", e)
         return jsonify({"status": "error", "message": str(e)}), 400
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=5000)
