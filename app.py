@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import requests
+import time
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -8,7 +9,10 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# 🔹 إرسال رسالة للتليجرام
+# ⏱ مدة التجميع (15 دقيقة)
+COLLECTION_INTERVAL = timedelta(minutes=15)
+
+# ✅ إرسال رسالة للتليجرام
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
@@ -17,7 +21,7 @@ def send_telegram(message):
     except Exception as e:
         print("خطأ أثناء إرسال التليجرام:", e)
 
-# 🔹 إرسال POST خارجي
+# إرسال POST خارجي
 def send_post_request(message, indicators):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     payload = {
@@ -31,58 +35,55 @@ def send_post_request(message, indicators):
     except Exception as e:
         print("خطأ أثناء إرسال POST:", e)
 
-# ✅ أقوى الإشارات لكل مؤشر
-STRONG_SIGNALS = {
-    "Signals & Overlays": ["bullish_confirmation+", "bearish_confirmation+"],
-    "Price Action Concepts": ["bullish_ibos+", "bearish_ibos+"],
-    "Oscillator Matrix": ["strong_bullish_confluence", "strong_bearish_confluence"]
-}
-
-# تخزين آخر وقت لكل إشارة
-signal_store = {}
+# 🔹 تخزين الإشارات المجمعة
+collected_signals = []
+collection_start_time = None
 
 # ✅ معالجة التنبيهات
 def process_alerts(alerts):
-    global signal_store
-    now = datetime.utcnow()
-    
-    # إزالة أي إشارات أقدم من 15 دقيقة
-    for key in list(signal_store.keys()):
-        if now - signal_store[key]["time"] > timedelta(minutes=15):
-            del signal_store[key]
-    
-    # تحديث المتجر بالإشارات الجديدة
+    global collected_signals, collection_start_time
+    current_time = datetime.utcnow()
+
+    # بدء الفترة إذا لم تبدأ
+    if collection_start_time is None or current_time - collection_start_time > COLLECTION_INTERVAL:
+        collected_signals = []
+        collection_start_time = current_time
+
+    # إشارات قوية من كل مؤشر
+    signals_mapping = {
+        "Signals & Overlays": ["bullish_confirmation+", "bearish_confirmation+", "bullish_ichoch+"],
+        "Price Action Concepts": ["bullish_ibos", "bearish_ibos", "bullish_sbos"],
+        "Oscillator Matrix": ["strong_bullish_confluence", "strong_bearish_confluence", "regular_bullish_hyperwave_signal"]
+    }
+
     for alert in alerts:
         indicator = alert.get("indicator")
         signal = alert.get("signal")
-        if indicator in STRONG_SIGNALS and signal in STRONG_SIGNALS[indicator]:
-            signal_store[indicator] = {"signal": signal, "time": now}
-    
-    # التحقق من وجود إشارتين أو أكثر من مؤشرات مختلفة
-    if len(signal_store) >= 2:
-        indicators_list = " + ".join([f"{ind}: {signal_store[ind]['signal']}" for ind in signal_store])
-        message = f"🚀 Signals Confirmed ({len(signal_store)} Indicators)\n📊 {indicators_list}"
-        send_post_request(message, indicators_list)
-        send_telegram(message)
+        if indicator in signals_mapping and signal in signals_mapping[indicator]:
+            # تجنب تكرار نفس المؤشر
+            if not any(s['indicator'] == indicator for s in collected_signals):
+                collected_signals.append({"indicator": indicator, "signal": signal, "time": current_time})
+
+    # تحقق من شرط الإرسال: إشارتان أو أكثر من مؤشرات مختلفة
+    unique_indicators = set(s['indicator'] for s in collected_signals)
+    if len(unique_indicators) >= 2:
+        indicators_list = " + ".join(unique_indicators)
+        telegram_message = f"🚀 Strong Signals Detected ({len(unique_indicators)} Confirmed)\nIndicators: {indicators_list}"
+        send_post_request(telegram_message, indicators_list)
+        send_telegram(telegram_message)
+        # إعادة تعيين بعد الإرسال
+        collected_signals = []
+        collection_start_time = None
         return True
+
     return False
 
 # ✅ استقبال الويب هوك
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # التعامل مع JSON حتى لو كان Content-Type غير مضبوط
-        if request.is_json:
-            data = request.get_json()
-        else:
-            data = request.get_data(as_text=True)
-            import json
-            try:
-                data = json.loads(data)
-            except:
-                return jsonify({"status": "invalid_json"}), 400
-
-        print("Received webhook:", data)
+        data = request.get_json(force=True)
+        print("⚠️ Received raw webhook:", data)
 
         alerts = data.get("alerts", [])
         if alerts:
@@ -92,11 +93,11 @@ def webhook():
             else:
                 return jsonify({"status": "not_enough_signals"}), 200
         else:
-            return jsonify({"status": "no_alerts"}), 200
+            return jsonify({"status": "no_alerts"}), 400
 
     except Exception as e:
         print("Error:", e)
         return jsonify({"status": "error", "message": str(e)}), 400
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=10000)
