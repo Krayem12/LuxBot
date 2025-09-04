@@ -1,43 +1,74 @@
 from flask import Flask, request, jsonify
 import requests
 
-app = Flask(__name__)
+app = Flask(_name_)
 
 # 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# 🔹 إرسال رسالة للتليجرام
-def send_telegram(message: str):
+# ✅ إرسال رسالة للتليجرام
+def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": str(message)}  # تحويل لضمان نص
-    r = requests.post(url, json=payload)
+    payload = {"chat_id": CHAT_ID, "text": message}
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        print("خطأ أثناء إرسال التليجرام:", e)
 
-    print("📤 Payload to Telegram:", payload)
-    print("📥 Telegram response:", r.status_code, r.text)
+def send_post_request(message, indicators):
+    url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
+    payload = {
+        "type": message,
+        "extras": {
+            "indicators": indicators
+        }
+    }
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        print("خطأ أثناء إرسال POST:", e)
 
-# 🔹 استقبال من TradingView
+
+# ✅ معالجة التنبيهات
+def process_alerts(alerts):
+    indicators_triggered = []
+
+    for alert in alerts:
+        indicator = alert.get("indicator", "")
+        message = alert.get("message", "")
+
+        if message == "CALL":
+            indicators_triggered.append(indicator)
+
+    if len(indicators_triggered) >= 2:
+        indicators_list = " + ".join(indicators_triggered)
+        telegram_message = f"CALL 🚀 ({len(indicators_triggered)} Confirmed Signals)\n📊 Indicators: {indicators_list}"
+        send_post_request(telegram_message,indicator)
+        send_telegram(telegram_message)
+        return True
+    return False
+
+# ✅ استقبال الويب هوك
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # نحاول قراءة JSON أول
-        data = request.get_json(force=False, silent=True)
-        
-        if not data:
-            # إذا ما وصل JSON، ناخذ النص الخام
-            data_text = request.data.decode("utf-8")
-            print("✅ Received raw webhook:", data_text)
-            msg = f"📊 Raw alert: {data_text}"
-        else:
-            print("✅ Received webhook JSON:", data)
-            msg = f"🚨 إشارة جديدة: {data.get('type', 'N/A')}\nرمز: {data.get('extras', {}).get('ticker', 'N/A')}\nسعر الإغلاق: {data.get('extras', {}).get('close', 'N/A')}"
+        data = request.get_json(force=True)
+        print("Received webhook:", data)
 
-        send_telegram(msg)
-        return {"status": "ok"}, 200
+        alerts = data.get("alerts", [])
+        if alerts:
+            triggered = process_alerts(alerts)
+            if triggered:
+                return jsonify({"status": "alert_sent"}), 200
+            else:
+                return jsonify({"status": "not_enough_signals"}), 200
+        else:
+            return jsonify({"status": "no_alerts"}), 400
 
     except Exception as e:
-        print("❌ Error:", e)
-        return {"status": "error", "message": str(e)}, 500
+        print("Error:", e)
+        return jsonify({"status": "error", "message": str(e)}), 400
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+if _name_ == "_main_":
+    app.run(host="0.0.0.0", port=5000
