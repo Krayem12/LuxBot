@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 import requests
-from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -17,7 +16,7 @@ def send_telegram(message):
     except Exception as e:
         print("خطأ أثناء إرسال التليجرام:", e)
 
-# ✅ إرسال POST خارجي
+# 🔹 إرسال POST خارجي
 def send_post_request(message, indicators):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     payload = {
@@ -31,40 +30,21 @@ def send_post_request(message, indicators):
     except Exception as e:
         print("خطأ أثناء إرسال POST:", e)
 
-# ✅ تخزين مؤقت للإشارات
-alert_cache = []
-CACHE_DURATION = timedelta(seconds=60)  # مدة التجميع: 60 ثانية
-
-# ✅ معالجة الإشارات
+# ✅ معالجة التنبيهات
 def process_alerts(alerts):
-    global alert_cache
-    now = datetime.utcnow()
+    indicators_triggered = []
 
-    # أضف الإشارات الجديدة مع وقت الوصول
     for alert in alerts:
-        alert_cache.append({
-            "indicator": alert.get("indicator", ""),
-            "signal": alert.get("signal", ""),
-            "time": now
-        })
+        indicator = alert.get("indicator", "Unknown")
+        message = alert.get("message", alert.get("signal", "Raw Signal"))
 
-    # احتفظ بالإشارات ضمن مدة CACHE_DURATION فقط
-    alert_cache = [a for a in alert_cache if now - a["time"] <= CACHE_DURATION]
+        indicators_triggered.append(indicator)
 
-    # اجمع المؤشرات والإشارات
-    indicators_triggered = [a["indicator"] for a in alert_cache]
-    signals_triggered = [a["signal"] for a in alert_cache]
-
-    if len(indicators_triggered) >= 2:
+    if indicators_triggered:
         indicators_list = " + ".join(indicators_triggered)
-        signals_list = " + ".join(signals_triggered)
-        telegram_message = f"Signals 🚀 ({len(indicators_triggered)} Confirmed)\n📊 Indicators: {indicators_list}\n⚡ Signals: {signals_list}"
-        
+        telegram_message = f"Alert 🚀 ({len(indicators_triggered)} Signals)\n📊 Indicators: {indicators_list}\n💬 Messages: {', '.join([a.get('message', a.get('signal', '')) for a in alerts])}"
         send_post_request(telegram_message, indicators_list)
         send_telegram(telegram_message)
-
-        # بعد الإرسال، نظف التخزين المؤقت
-        alert_cache.clear()
         return True
     return False
 
@@ -72,24 +52,29 @@ def process_alerts(alerts):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        data = request.get_json(force=True)
-        print("Received webhook:", data)
+        alerts = []
 
-        alerts = data.get("alerts", [])
-        if alerts:
-            triggered = process_alerts(alerts)
-            if triggered:
-                return jsonify({"status": "alert_sent"}), 200
-            else:
-                return jsonify({"status": "not_enough_signals"}), 200
+        # JSON
+        if request.is_json:
+            data = request.get_json(force=True)
+            print("Received JSON webhook:", data)
+            alerts = data.get("alerts", [])
         else:
-            return jsonify({"status": "no_alerts"}), 400
+            # نص خام
+            raw = request.data.decode("utf-8").strip()
+            print("Received raw webhook:", raw)
+            if raw:
+                alerts = [{"signal": raw, "indicator": "Raw Text", "message": raw}]
+
+        if alerts:
+            process_alerts(alerts)
+            return jsonify({"status": "alert_sent"}), 200
+        else:
+            return jsonify({"status": "no_alerts"}), 200
 
     except Exception as e:
         print("Error:", e)
         return jsonify({"status": "error", "message": str(e)}), 400
 
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 10000))  # Render يرسل البورت في متغير البيئة
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
