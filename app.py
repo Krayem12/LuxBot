@@ -12,25 +12,31 @@ CHAT_ID = "624881400"
 # =========================
 # ⏱ إدارة تنبيهات LuxAlgo
 # =========================
-signal_tracker = {
-    "Signals & Overlays": [],
-    "Price Action Concepts": [],
-    "Oscillator Matrix": []
-}
-
+signal_tracker = []
 MAX_WINDOW = timedelta(minutes=15)  # ربع ساعة
 
-strong_signals = {
-    "Signals & Overlays": [
-        "{bullish_confirmation+}", "{bearish_confirmation+}", "{bullish_contrarian+}"
-    ],
-    "Price Action Concepts": [
-        "{bullish_ibos}", "{bearish_ibos}", "{bullish_ichoch+}"
-    ],
-    "Oscillator Matrix": [
-        "{strong_bullish_confluence}", "{strong_bearish_confluence}", "{regular_bullish_hyperwave_signal}"
-    ]
+# 🟢 تعريف الأوزان لكل إشارة
+signal_weights = {
+    # Signals & Overlays
+    "{bullish_confirmation+}": 3,
+    "{bearish_confirmation+}": 3,
+    "{bullish_contrarian+}": 2,
+    "{bearish_contrarian+}": 2,
+
+    # Price Action Concepts
+    "{bullish_ibos}": 3,
+    "{bearish_ibos}": 3,
+    "{bullish_ichoch+}": 2,
+    "{bearish_ichoch+}": 2,
+
+    # Oscillator Matrix
+    "{strong_bullish_confluence}": 3,
+    "{strong_bearish_confluence}": 3,
+    "{regular_bullish_hyperwave_signal}": 2,
+    "{regular_bearish_hyperwave_signal}": 2
 }
+
+MIN_WEIGHT_THRESHOLD = 5  # الحد الأدنى لمجموع الأوزان للإرسال
 
 # =========================
 # 🔹 إرسال رسالة للتليجرام
@@ -63,23 +69,32 @@ def send_post_request(message, indicators):
 # 🔹 معالجة التنبيهات
 # =========================
 def process_alerts(alerts):
+    global signal_tracker
     now = datetime.utcnow()
+
     for alert in alerts:
         indicator = alert.get("indicator", "")
         signal = alert.get("signal", "")
 
-        if indicator in strong_signals and signal in strong_signals[indicator]:
-            signal_tracker[indicator].append(now)
-            signal_tracker[indicator] = [
-                t for t in signal_tracker[indicator] if now - t <= MAX_WINDOW
-            ]
+        if signal in signal_weights:
+            signal_tracker.append({"signal": signal, "indicator": indicator, "time": now})
 
-    active_indicators = [k for k, v in signal_tracker.items() if v]
-    if len(active_indicators) >= 2:
-        indicators_list = " + ".join(active_indicators)
-        telegram_message = f"🚀 Strong LuxAlgo Signals!\nIndicators: {indicators_list}"
+    # تنظيف الإشارات الأقدم من 15 دقيقة
+    signal_tracker = [s for s in signal_tracker if now - s["time"] <= MAX_WINDOW]
+
+    # حساب مجموع الأوزان
+    total_weight = sum(signal_weights.get(s["signal"], 0) for s in signal_tracker)
+
+    # التحقق من عدد المؤشرات المختلفة
+    unique_indicators = set(s["indicator"] for s in signal_tracker)
+
+    # شرط الإرسال: مجموع الأوزان + مؤشرين مختلفين
+    if total_weight >= MIN_WEIGHT_THRESHOLD and len(unique_indicators) >= 2:
+        indicators_list = ", ".join(unique_indicators)
+        telegram_message = f"🚀 LuxAlgo Strong Weighted Alert!\nTotal Weight: {total_weight}\nIndicators: {indicators_list}"
         send_post_request(telegram_message, indicators_list)
         send_telegram(telegram_message)
+        signal_tracker = []  # إعادة الضبط بعد الإرسال
         return True
     return False
 
