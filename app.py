@@ -9,6 +9,13 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
+# تخزين مؤقت للإشارات
+signal_memory = {
+    "bullish": [],
+    "bearish": []
+}
+signal_expiry = timedelta(minutes=15)  # مدة صلاحية الإشارة (ربع ساعة)
+
 # 🔹 إرسال رسالة للتليجرام
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -32,30 +39,40 @@ def send_post_request(message, indicators):
     except Exception as e:
         print("خطأ أثناء إرسال POST:", e)
 
+# ✅ تنظيف الإشارات القديمة
+def cleanup_signals():
+    now = datetime.utcnow()
+    for direction in ["bullish", "bearish"]:
+        signal_memory[direction] = [
+            (sig, ts) for sig, ts in signal_memory[direction] if now - ts < signal_expiry
+        ]
+
 # ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
-    bullish_signals = []
-    bearish_signals = []
+    now = datetime.utcnow()
 
     for alert in alerts:
         signal = alert.get("signal", "")
         direction = alert.get("direction", "")
 
-        if direction == "bullish":
-            bullish_signals.append(signal)
-        elif direction == "bearish":
-            bearish_signals.append(signal)
+        if direction in signal_memory:
+            signal_memory[direction].append((signal, now))
 
-    # إرسال CALL إذا تحقق إشارتان صاعدتان أو أكثر
-    if len(bullish_signals) >= 2:
-        telegram_message = f"CALL 🚀 ({len(bullish_signals)} Signals Confirmed)"
-        send_post_request(telegram_message, " + ".join(bullish_signals))
+    # تنظيف القديم
+    cleanup_signals()
+
+    # تحقق من الصعود
+    if len(signal_memory["bullish"]) >= 2:
+        signals = [s for s, _ in signal_memory["bullish"]]
+        telegram_message = f"CALL 🚀 ({len(signals)} Signals in 15m)"
+        send_post_request(telegram_message, " + ".join(signals))
         send_telegram(telegram_message)
 
-    # إرسال PUT إذا تحقق إشارتان هابطتان أو أكثر
-    if len(bearish_signals) >= 2:
-        telegram_message = f"PUT 📉 ({len(bearish_signals)} Signals Confirmed)"
-        send_post_request(telegram_message, " + ".join(bearish_signals))
+    # تحقق من الهبوط
+    if len(signal_memory["bearish"]) >= 2:
+        signals = [s for s, _ in signal_memory["bearish"]]
+        telegram_message = f"PUT 📉 ({len(signals)} Signals in 15m)"
+        send_post_request(telegram_message, " + ".join(signals))
         send_telegram(telegram_message)
 
 # ✅ استقبال الويب هوك
@@ -78,7 +95,7 @@ def webhook():
 
         if alerts:
             process_alerts(alerts)
-            return jsonify({"status": "alert_sent"}), 200
+            return jsonify({"status": "alert_received"}), 200
         else:
             return jsonify({"status": "no_alerts"}), 200
 
