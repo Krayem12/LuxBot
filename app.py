@@ -1,5 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
+from datetime import datetime, timedelta
+import os
 
 app = Flask(__name__)
 
@@ -7,7 +9,7 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# ✅ إرسال رسالة للتليجرام
+# 🔹 إرسال رسالة للتليجرام
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
@@ -30,23 +32,31 @@ def send_post_request(message, indicators):
     except Exception as e:
         print("خطأ أثناء إرسال POST:", e)
 
-# ✅ معالجة التنبيهات
+# ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
-    indicators_triggered = []
+    bullish_signals = []
+    bearish_signals = []
 
     for alert in alerts:
-        indicator = alert.get("indicator", "Unknown")
-        message = alert.get("message", alert.get("signal", "Raw Signal"))
+        signal = alert.get("signal", "")
+        direction = alert.get("direction", "")
 
-        indicators_triggered.append(indicator)
+        if direction == "bullish":
+            bullish_signals.append(signal)
+        elif direction == "bearish":
+            bearish_signals.append(signal)
 
-    if indicators_triggered:
-        indicators_list = " + ".join(indicators_triggered)
-        telegram_message = f"Alert 🚀 ({len(indicators_triggered)} Signals)\n📊 Indicators: {indicators_list}\n💬 Messages: {', '.join([a.get('message', a.get('signal', '')) for a in alerts])}"
-        send_post_request(telegram_message, indicators_list)
+    # إرسال CALL إذا تحقق إشارتان صاعدتان أو أكثر
+    if len(bullish_signals) >= 2:
+        telegram_message = f"CALL 🚀 ({len(bullish_signals)} Signals Confirmed)"
+        send_post_request(telegram_message, " + ".join(bullish_signals))
         send_telegram(telegram_message)
-        return True
-    return False
+
+    # إرسال PUT إذا تحقق إشارتان هابطتان أو أكثر
+    if len(bearish_signals) >= 2:
+        telegram_message = f"PUT 📉 ({len(bearish_signals)} Signals Confirmed)"
+        send_post_request(telegram_message, " + ".join(bearish_signals))
+        send_telegram(telegram_message)
 
 # ✅ استقبال الويب هوك
 @app.route("/webhook", methods=["POST"])
@@ -64,7 +74,7 @@ def webhook():
             raw = request.data.decode("utf-8").strip()
             print("Received raw webhook:", raw)
             if raw:
-                alerts = [{"signal": raw, "indicator": "Raw Text", "message": raw}]
+                alerts = [{"signal": raw, "indicator": "Raw Text", "message": raw, "direction": "bullish"}]
 
         if alerts:
             process_alerts(alerts)
@@ -76,5 +86,7 @@ def webhook():
         print("Error:", e)
         return jsonify({"status": "error", "message": str(e)}), 400
 
+# 🔹 تشغيل التطبيق على Render
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
