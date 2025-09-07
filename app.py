@@ -6,7 +6,7 @@ import os
 app = Flask(__name__)
 
 # 🔹 بيانات التليجرام
-TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
+TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9c"
 CHAT_ID = "624881400"
 
 # 🔹 ذاكرة مؤقتة لتخزين الإشارات
@@ -44,17 +44,31 @@ def cleanup_signals():
     for direction in signal_memory:
         signal_memory[direction] = [(sig, ts) for sig, ts in signal_memory[direction] if ts > cutoff]
 
+# ✅ تحويل النص الخام إلى صياغة مرتبة
+def format_signal(signal_text, direction):
+    if "upward" in signal_text.lower():
+        return f"Hyper Wave oscillator upward signal 🚀"
+    elif "downward" in signal_text.lower():
+        return f"Hyper Wave oscillator downward signal 📉"
+    else:
+        # أي إشارات أخرى نحتفظ بالنص الأساسي
+        symbol = "🚀" if direction == "bullish" else "📉"
+        return f"{signal_text} {symbol}"
+
 # ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
     now = datetime.utcnow()
 
     for alert in alerts:
         signal = alert.get("signal", "").strip()
-        direction = alert.get("direction", "").strip()
-        indicator = alert.get("indicator", "").strip()
+        direction = alert.get("direction", "bullish").strip()
+        indicator = alert.get("indicator", "Raw Text").strip()
 
-        # مفتاح فريد يجمع signal + indicator + direction
-        unique_key = f"{signal}_{indicator}_{direction}"
+        # صياغة الإشارة
+        formatted_signal = format_signal(signal, direction)
+
+        # مفتاح فريد يجمع formatted_signal + indicator + direction
+        unique_key = f"{formatted_signal}_{indicator}_{direction}"
 
         if direction in signal_memory:
             existing_signals = [s for s, _ in signal_memory[direction]]
@@ -66,15 +80,15 @@ def process_alerts(alerts):
 
     # تحقق من إشارات الصعود
     if len(signal_memory["bullish"]) >= 2:
-        signals = [s for s, _ in signal_memory["bullish"]]
-        telegram_message = f"CALL 🚀 ({len(signals)} Signals in 15m)\n{', '.join(signals)}"
+        signals = [s.split("_")[0] for s, _ in signal_memory["bullish"]]
+        telegram_message = f"CALL 🚀 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
         send_post_request(telegram_message, " + ".join(signals))
         send_telegram(telegram_message)
 
     # تحقق من إشارات الهبوط
     if len(signal_memory["bearish"]) >= 2:
-        signals = [s for s, _ in signal_memory["bearish"]]
-        telegram_message = f"PUT 📉 ({len(signals)} Signals in 15m)\n{', '.join(signals)}"
+        signals = [s.split("_")[0] for s, _ in signal_memory["bearish"]]
+        telegram_message = f"PUT 📉 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
         send_post_request(telegram_message, " + ".join(signals))
         send_telegram(telegram_message)
 
