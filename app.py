@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 from datetime import datetime, timedelta
 import os
+from collections import defaultdict
 
 app = Flask(__name__)
 
@@ -9,11 +10,25 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9c"
 CHAT_ID = "624881400"
 
-# 🔹 ذاكرة مؤقتة لتخزين الإشارات
-signal_memory = {
+# 🔹 تحميل قائمة الأسهم من ملف
+def load_stocks():
+    stocks = []
+    try:
+        with open('stocks.txt', 'r') as f:
+            stocks = [line.strip().upper() for line in f if line.strip()]
+    except FileNotFoundError:
+        print("⚠️  ملف stocks.txt غير موجود. سيتم استخدام قائمة افتراضية.")
+        stocks = ["BTCUSDT", "ETHUSDT"]  # قائمة افتراضية
+    return stocks
+
+# قائمة الأسهم
+STOCK_LIST = load_stocks()
+
+# 🔹 ذاكرة مؤقتة لتخزين الإشارات لكل سهم
+signal_memory = defaultdict(lambda: {
     "bullish": [],
     "bearish": []
-}
+})
 
 # 🔹 إرسال رسالة للتليجرام
 def send_telegram(message):
@@ -41,8 +56,12 @@ def send_post_request(message, indicators):
 # 🔹 تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
 def cleanup_signals():
     cutoff = datetime.utcnow() - timedelta(minutes=15)
-    for direction in signal_memory:
-        signal_memory[direction] = [(sig, ts) for sig, ts in signal_memory[direction] if ts > cutoff]
+    for symbol in STOCK_LIST:
+        for direction in ["bullish", "bearish"]:
+            signal_memory[symbol][direction] = [
+                (sig, ts) for sig, ts in signal_memory[symbol][direction] 
+                if ts > cutoff
+            ]
 
 # ✅ تحويل النص الخام إلى صياغة مرتبة
 def format_signal(signal_text, direction):
@@ -51,9 +70,16 @@ def format_signal(signal_text, direction):
     elif "downward" in signal_text.lower():
         return f"Hyper Wave oscillator downward signal 📉"
     else:
-        # أي إشارات أخرى نحتفظ بالنص الأساسي
         symbol = "🚀" if direction == "bullish" else "📉"
         return f"{signal_text} {symbol}"
+
+# ✅ استخراج اسم السهم من الرسالة
+def extract_symbol(message):
+    message_upper = message.upper()
+    for symbol in STOCK_LIST:
+        if symbol in message_upper:
+            return symbol
+    return "UNKNOWN"  # إذا لم يتم العثور على أي سهم معروف
 
 # ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
@@ -63,6 +89,11 @@ def process_alerts(alerts):
         signal = alert.get("signal", "").strip()
         direction = alert.get("direction", "bullish").strip()
         indicator = alert.get("indicator", "Raw Text").strip()
+        
+        # استخراج السهم من الرسالة
+        symbol = extract_symbol(signal)
+        if symbol == "UNKNOWN":
+            continue  # تخطي إذا لم يتعرف على السهم
 
         # صياغة الإشارة
         formatted_signal = format_signal(signal, direction)
@@ -70,27 +101,28 @@ def process_alerts(alerts):
         # مفتاح فريد يجمع formatted_signal + indicator + direction
         unique_key = f"{formatted_signal}_{indicator}_{direction}"
 
-        if direction in signal_memory:
-            existing_signals = [s for s, _ in signal_memory[direction]]
-            if unique_key not in existing_signals:
-                signal_memory[direction].append((unique_key, now))
+        # تخزين الإشارة للسم المحدد
+        if unique_key not in [s for s, _ in signal_memory[symbol][direction]]:
+            signal_memory[symbol][direction].append((unique_key, now))
 
-    # تنظيف القديم
+    # تنظيف الإشارات القديمة
     cleanup_signals()
 
-    # تحقق من إشارات الصعود
-    if len(signal_memory["bullish"]) >= 2:
-        signals = [s.split("_")[0] for s, _ in signal_memory["bullish"]]
-        telegram_message = f"CALL 🚀 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
-        send_post_request(telegram_message, " + ".join(signals))
-        send_telegram(telegram_message)
+    # التحقق من إشارات كل سهم
+    for symbol in STOCK_LIST:
+        # تحقق من إشارات الصعود
+        if len(signal_memory[symbol]["bullish"]) >= 2:
+            signals = [s.split("_")[0] for s, _ in signal_memory[symbol]["bullish"]]
+            telegram_message = f"{symbol} CALL 🚀 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
+            send_post_request(telegram_message, " + ".join(signals))
+            send_telegram(telegram_message)
 
-    # تحقق من إشارات الهبوط
-    if len(signal_memory["bearish"]) >= 2:
-        signals = [s.split("_")[0] for s, _ in signal_memory["bearish"]]
-        telegram_message = f"PUT 📉 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
-        send_post_request(telegram_message, " + ".join(signals))
-        send_telegram(telegram_message)
+        # تحقق من إشارات الهبوط
+        if len(signal_memory[symbol]["bearish"]) >= 2:
+            signals = [s.split("_")[0] for s, _ in signal_memory[symbol]["bearish"]]
+            telegram_message = f"{symbol} PUT 📉 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
+            send_post_request(telegram_message, " + ".join(signals))
+            send_telegram(telegram_message)
 
 # ✅ استقبال الويب هوك
 @app.route("/webhook", methods=["POST"])
@@ -98,13 +130,11 @@ def webhook():
     try:
         alerts = []
 
-        # JSON
         if request.is_json:
             data = request.get_json(force=True)
             print("Received JSON webhook:", data)
             alerts = data.get("alerts", [])
         else:
-            # نص خام
             raw = request.data.decode("utf-8").strip()
             print("Received raw webhook:", raw)
             if raw:
@@ -120,7 +150,8 @@ def webhook():
         print("Error:", e)
         return jsonify({"status": "error", "message": str(e)}), 400
 
-# 🔹 تشغيل التطبيق على Render
+# 🔹 تشغيل التطبيق
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
+    print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
     app.run(host="0.0.0.0", port=port)
