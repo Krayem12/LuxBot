@@ -10,6 +10,9 @@ app = Flask(__name__)
 # 🔹 إعداد التوقيت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 
+# 🔹 عدد الإشارات المطلوبة (تم التغيير من 1 إلى 2)
+REQUIRED_SIGNALS = 2
+
 # 🔹 بيانات التليجرام الصحيحة
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
@@ -172,7 +175,7 @@ def extract_signal_name(raw_signal):
     else:
         return raw_signal  # إرجاع النص الأصلي إذا لم يتم التعرف
 
-# ✅ معالجة التنبيهات مع شرط اجتماع إشارة واحدة على الأقل
+# ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
     now = datetime.utcnow()
     print(f"🔍 Processing {len(alerts)} alerts")
@@ -213,10 +216,10 @@ def process_alerts(alerts):
     # تنظيف الإشارات القديمة
     cleanup_signals()
 
-    # التحقق من إشارات كل سهم - إشارة واحدة تكفي
+    # التحقق من إشارات كل سهم - إشارتان على الأقل (تم التغيير من 1 إلى 2)
     for symbol, signals in signal_memory.items():
         for direction in ["bullish", "bearish"]:
-            if len(signals[direction]) >= 2:  # إشارة واحدة تكفي
+            if len(signals[direction]) >= REQUIRED_SIGNALS:  # إشارتان على الأقل
                 signal_count = len(signals[direction])
                 
                 # استخراج اسم الإشارة من آخر إشارة مخزنة
@@ -346,7 +349,7 @@ def home():
         "status": "running",
         "message": "TradingView Webhook Receiver is active",
         "monitored_stocks": STOCK_LIST,
-        "active_signals": {k, v for k, v in signal_memory.items()},
+        "active_signals": {k: v for k, v in signal_memory.items()},  # ✓ تم التصحيح
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -374,6 +377,7 @@ if __name__ == "__main__":
     print(f"🟢 Telegram receiver: {CHAT_ID}")
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
     print(f"🟢 Saudi Timezone: UTC+{TIMEZONE_OFFSET}")
+    print(f"🟢 Required signals: {REQUIRED_SIGNALS}")
     print(f"🟢 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
     print("🟢 Waiting for TradingView webhooks...")
     app.run(host="0.0.0.0", port=port)
