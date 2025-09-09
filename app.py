@@ -1,102 +1,111 @@
 from flask import Flask, request, jsonify
 import requests
+from datetime import datetime, timedelta
 import os
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 # 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# ✅ إرسال رسالة للتليجرام
-def send_telegram(message: str):
+# =========================
+# ⏱ إدارة تنبيهات LuxAlgo
+# =========================
+signal_tracker = {
+    "Signals & Overlays": [],
+    "Price Action Concepts": [],
+    "Oscillator Matrix": []
+}
+
+MAX_WINDOW = timedelta(minutes=15)  # ربع ساعة
+
+strong_signals = {
+    "Signals & Overlays": [
+        "{bullish_confirmation+}", "{bearish_confirmation+}", "{bullish_contrarian+}"
+    ],
+    "Price Action Concepts": [
+        "{bullish_ibos}", "{bearish_ibos}", "{bullish_ichoch+}"
+    ],
+    "Oscillator Matrix": [
+        "{strong_bullish_confluence}", "{strong_bearish_confluence}", "{regular_bullish_hyperwave_signal}"
+    ]
+}
+
+# =========================
+# 🔹 إرسال رسالة للتليجرام
+# =========================
+def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
     try:
-        r = requests.post(url, json=payload)
-        print("📤 Payload to Telegram:", payload)
-        print("📥 Telegram response:", r.status_code, r.text)
+        requests.post(url, json=payload)
     except Exception as e:
-        print("❌ خطأ أثناء إرسال التليجرام:", e)
+        print("خطأ أثناء إرسال التليجرام:", e)
 
-# ✅ إرسال POST خارجي
+# =========================
+# 🔹 إرسال POST خارجي
+# =========================
 def send_post_request(message, indicators):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     payload = {
         "type": message,
-        "extras": indicators
+        "extras": {
+            "indicators": indicators
+        }
     }
     try:
-        r = requests.post(url, json=payload)
-        print("📤 Payload to external POST:", payload)
-        print("📥 Response:", r.status_code, r.text)
+        requests.post(url, json=payload)
     except Exception as e:
-        print("❌ خطأ أثناء إرسال POST:", e)
+        print("خطأ أثناء إرسال POST:", e)
 
-# ✅ مسار الترحيب
-@app.route("/", methods=["GET"])
-def home():
-    return "🟢 LuxAlgo Webhook Bot is running!"
+# =========================
+# 🔹 معالجة التنبيهات
+# =========================
+def process_alerts(alerts):
+    now = datetime.utcnow()
+    for alert in alerts:
+        indicator = alert.get("indicator", "")
+        signal = alert.get("signal", "")
 
-# ✅ استقبال الويب هوك
+        if indicator in strong_signals and signal in strong_signals[indicator]:
+            signal_tracker[indicator].append(now)
+            signal_tracker[indicator] = [
+                t for t in signal_tracker[indicator] if now - t <= MAX_WINDOW
+            ]
+
+    active_indicators = [k for k, v in signal_tracker.items() if v]
+    if len(active_indicators) >= 2:
+        indicators_list = " + ".join(active_indicators)
+        telegram_message = f"🚀 Strong LuxAlgo Signals!\nIndicators: {indicators_list}"
+        send_post_request(telegram_message, indicators_list)
+        send_telegram(telegram_message)
+        return True
+    return False
+
+# =========================
+# 🔹 استقبال الويب هوك
+# =========================
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    raw_data = request.data.decode('utf-8')
+    print("⚠️ Received raw webhook:", raw_data)
+
     try:
-        data = request.get_json(force=False, silent=True)
-        
-        if not data:
-            data_text = request.data.decode("utf-8")
-            print("✅ Received raw webhook:", data_text)
-            send_telegram(f"📊 Raw alert:\n{data_text}")
-            return jsonify({"status": "raw_alert_sent"}), 200
-
-        print("✅ Received webhook JSON:", data)
+        data = request.get_json(force=True)
         alerts = data.get("alerts", [])
-
-        if not alerts:
-            return jsonify({"status": "no_alerts"}), 400
-
-        # معالجة كل التنبيهات
-        for alert in alerts:
-            indicator = alert.get("indicator", "N/A")
-            signal = alert.get("signal", "N/A")
-            message = alert.get("message", "N/A")
-            ticker = alert.get("ticker", "N/A")
-            open_price = alert.get("open", "N/A")
-            high = alert.get("high", "N/A")
-            low = alert.get("low", "N/A")
-            close = alert.get("close", "N/A")
-            volume = alert.get("volume", "N/A")
-            barcolor = alert.get("barcolor", "N/A")
-            bar_index = alert.get("bar_index", "N/A")
-            hour = alert.get("hour", "N/A")
-            minute = alert.get("minute", "N/A")
-            telegram_message = (
-                f"🚨 Signal Alert\n"
-                f"🔹 Ticker: {ticker}\n"
-                f"🔹 Indicator: {indicator}\n"
-                f"🔹 Signal: {signal}\n"
-                f"🔹 Message: {message}\n"
-                f"🔹 OHLC: {open_price}/{high}/{low}/{close}\n"
-                f"🔹 Volume: {volume}\n"
-                f"🔹 Barcolor: {barcolor}\n"
-                f"🔹 Bar Index: {bar_index} | Time: {hour}:{minute}"
-            )
-            
-            data_indicators = {"indicator": indicator, "signal": signal, "message": message, "ticker": ticker, "open_price": open_price, "high": high, "low": low, "close": close, "volume": volume, "barcolor": barcolor, "bar_index": bar_index, "hour": hour, "minute": minute}
-            # إرسال للـ POST الخارجي
-            send_post_request(message, data_indicators)
-
-            # إرسال للتليجرام
-            send_telegram(telegram_message)
-
-        return jsonify({"status": "alerts_sent"}), 200
-
+        if alerts:
+            triggered = process_alerts(alerts)
+            return jsonify({"status": "alert_sent" if triggered else "not_enough_signals"}), 200
+        else:
+            return jsonify({"status": "no_alerts"}), 200
     except Exception as e:
-        print("❌ Error:", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
+        print("⚠️ Invalid JSON received, ignoring. Error:", e)
+        return jsonify({"status": "ignored_invalid_json"}), 200
 
-# ✅ تشغيل التطبيق مع المنفذ المرن
-if _name_ == "_main_":
+# =========================
+# 🔹 تشغيل التطبيق على Render
+# =========================
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
