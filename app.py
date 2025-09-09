@@ -55,26 +55,26 @@ signal_memory = defaultdict(lambda: {
     "bearish": []
 })
 
-# 🔹 إرسال POST خارجي (مفعّل بالكامل)
+# 🔹 إرسال POST خارجي (معدل لقيم type المتوقعة)
 def send_post_request(message, indicators, signal_type=None):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     
-    # تحديد نوع الإشارة تلقائياً إذا لم يتم تحديده
-    if signal_type is None:
-        if "صعودي" in message or "🚀" in message or "bullish" in message.lower():
-            signal_type = "BULLISH_CONFIRMATION"
-        elif "هبوطي" in message or "📉" in message or "bearish" in message.lower():
-            signal_type = "BEARISH_CONFIRMATION"
-        else:
-            signal_type = "TRADING_SIGNAL"
+    # تحويل type إلى القيم المتوقعة من الخادم الخارجي
+    if signal_type == "BULLISH_CONFIRMATION":
+        external_type = "bullish"  # القيمة التي يتوقعها الخادم
+    elif signal_type == "BEARISH_CONFIRMATION":
+        external_type = "bearish"  # القيمة التي يتوقعها الخادم
+    else:
+        external_type = signal_type.lower() if signal_type else "trading_signal"
     
     payload = {
-        "type": signal_type,
+        "type": external_type,  # استخدام القيمة المتوقعة
         "message": message,
         "extras": {
             "indicators": indicators,
             "timestamp": datetime.utcnow().isoformat(),
-            "source": "tradingview-bot"
+            "source": "tradingview-bot",
+            "original_signal_type": signal_type  # حفظ النوع الأصلي للتصحيح
         }
     }
     
@@ -135,6 +135,29 @@ def extract_symbol(message):
     
     return "SPX500"  # افتراضي
 
+# ✅ استخراج اسم الإشارة من الرسالة
+def extract_signal_name(raw_signal):
+    signal_lower = raw_signal.lower()
+    
+    if "bullish" in signal_lower and "bos" in signal_lower:
+        return "كسر هيكل صعودي"
+    elif "bearish" in signal_lower and "bos" in signal_lower:
+        return "كسر هيكل هبوطي"
+    elif "bullish" in signal_lower and "choch" in signal_lower:
+        return "تغير Character صعودي"
+    elif "bearish" in signal_lower and "choch" in signal_lower:
+        return "تغير Character هبوطي"
+    elif "bullish" in signal_lower and "confluence" in signal_lower:
+        return "تقارب صعودي قوي"
+    elif "bearish" in signal_lower and "confluence" in signal_lower:
+        return "تقارب هبوطي قوي"
+    elif "bullish" in signal_lower:
+        return "إشارة صعودية"
+    elif "bearish" in signal_lower:
+        return "إشارة هبوطية"
+    else:
+        return raw_signal  # إرجاع النص الأصلي إذا لم يتم التعرف
+
 # ✅ معالجة التنبيهات مع شرط اجتماع إشارة واحدة على الأقل
 def process_alerts(alerts):
     now = datetime.utcnow()
@@ -181,11 +204,28 @@ def process_alerts(alerts):
         for direction in ["bullish", "bearish"]:
             if len(signals[direction]) >= 1:  # إشارة واحدة تكفي
                 signal_count = len(signals[direction])
+                
+                # استخراج اسم الإشارة من آخر إشارة مخزنة
+                last_signal = signals[direction][-1][0] if signals[direction] else "إشارة"
+                signal_name = extract_signal_name(last_signal)
+                
                 if direction == "bullish":
-                    message = f"🚀 {symbol} - تأكيد انطلاق صعودي ({signal_count} إشارات)"
+                    message = f"""🚀 <b>{symbol} - إشارة صعودية</b>
+
+📊 <b>نوع الإشارة:</b> {signal_name}
+🔢 <b>عدد الإشارات:</b> {signal_count}
+⏰ <b>الوقت:</b> {datetime.now().strftime('%H:%M:%S')}
+
+<code>انطلاق صعودي متوقع</code>"""
                     signal_type = "BULLISH_CONFIRMATION"
                 else:
-                    message = f"📉 {symbol} - تأكيد انطلاق هبوطي ({signal_count} إشارات)"
+                    message = f"""📉 <b>{symbol} - إشارة هبوطية</b>
+
+📊 <b>نوع الإشارة:</b> {signal_name}
+🔢 <b>عدد الإشارات:</b> {signal_count}
+⏰ <b>الوقت:</b> {datetime.now().strftime('%H:%M:%S')}
+
+<code>انطلاق هبوطي متوقع</code>"""
                     signal_type = "BEARISH_CONFIRMATION"
                 
                 # إرسال إلى التليجرام
@@ -196,8 +236,10 @@ def process_alerts(alerts):
                 
                 if telegram_success and external_success:
                     print(f"🎉 تم إرسال التنبيه بنجاح لـ {symbol}")
+                elif telegram_success and not external_success:
+                    print(f"⚠️ تم الإرسال للتليجرام لكن فشل الخادم الخارجي لـ {symbol}")
                 else:
-                    print(f"⚠️ حدثت أخطاء جزئية في الإرسال لـ {symbol}")
+                    print(f"❌ فشل الإرسال بالكامل لـ {symbol}")
                 
                 # مسح الإشارات بعد الإرسال
                 signal_memory[symbol][direction] = []
@@ -300,7 +342,7 @@ def test_services():
     print(f"Telegram test result: {telegram_result}")
     
     # اختبار الخادم الخارجي
-    external_result = send_post_request("Test message", "TEST_SIGNAL", "TEST")
+    external_result = send_post_request("Test message", "TEST_SIGNAL", "BULLISH_CONFIRMATION")
     print(f"External API test result: {external_result}")
     
     return telegram_result and external_result
