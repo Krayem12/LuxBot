@@ -7,15 +7,11 @@ import json
 
 app = Flask(__name__)
 
-# 🔹 بيانات التليجرام لمتعدد المستلمين
+# 🔹 بيانات التليجرام لمستخدم واحد فقط
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9c"
-CHAT_IDS = [
-    "624881400",          # Chat ID الأول
-    "-1001234567890",     # Chat ID الثاني (لمجموعة)
-    "-1009876543210"      # Chat ID الثالث (لقناة)
-]
+CHAT_IDS = ["624881400"]  # مستخدم واحد فقط
 
-# 🔹 إرسال رسالة لجميع الدردشات
+# 🔹 إرسال رسالة لمستخدم واحد
 def send_telegram_to_all(message):
     for chat_id in CHAT_IDS:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -27,8 +23,10 @@ def send_telegram_to_all(message):
         try:
             response = requests.post(url, json=payload)
             print(f"تم الإرسال إلى {chat_id}: {response.status_code}")
+            return True
         except Exception as e:
             print(f"خطأ أثناء الإرسال إلى {chat_id}: {e}")
+            return False
 
 # 🔹 تحميل قائمة الأسهم من ملف
 def load_stocks():
@@ -106,12 +104,25 @@ def format_signal(signal_text, direction):
 # ✅ استخراج اسم السهم من الرسالة
 def extract_symbol(message):
     message_upper = message.upper()
+    
+    # البحث عن أي رمز سهم في القائمة
     for symbol in STOCK_LIST:
         if symbol in message_upper:
             return symbol
-    return "UNKNOWN"
+    
+    # إذا لم يتم العثور، البحث عن patterns معروفة
+    if "SPX" in message_upper:
+        return "SPX500"
+    elif "BTC" in message_upper:
+        return "BTCUSDT" 
+    elif "ETH" in message_upper:
+        return "ETHUSDT"
+    elif "NASDAQ" in message_upper:
+        return "NASDAQ100"
+    
+    return "SPX500"  # افتراضي
 
-# ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
+# ✅ معالجة التنبيهات مع شرط اجتماع إشارة واحدة على الأقل
 def process_alerts(alerts):
     now = datetime.utcnow()
     print(f"🔍 Processing {len(alerts)} alerts")
@@ -152,10 +163,10 @@ def process_alerts(alerts):
     # تنظيف الإشارات القديمة
     cleanup_signals()
 
-    # التحقق من إشارات كل سهم
+    # التحقق من إشارات كل سهم - إشارة واحدة تكفي
     for symbol, signals in signal_memory.items():
         for direction in ["bullish", "bearish"]:
-            if len(signals[direction]) >= 2:
+            if len(signals[direction]) >= 1:  # إشارة واحدة تكفي
                 signal_count = len(signals[direction])
                 if direction == "bullish":
                     message = f"🚀 {symbol} - تأكيد انطلاق صعودي ({signal_count} إشارات)"
@@ -263,7 +274,7 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"🟢 Server started on port {port}")
-    print(f"🟢 Telegram receivers: {len(CHAT_IDS)}")
+    print(f"🟢 Telegram receiver: {CHAT_IDS[0]}")
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
     print("🟢 Waiting for TradingView webhooks...")
     app.run(host="0.0.0.0", port=port)
