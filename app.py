@@ -9,24 +9,25 @@ app = Flask(__name__)
 
 # 🔹 بيانات التليجرام لمستخدم واحد فقط
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9c"
-CHAT_ID = "624881400"
+CHAT_ID = "624881400"  # مستخدم واحد فقط
 
 # 🔹 إرسال رسالة لمستخدم واحد
 def send_telegram_to_all(message):
-    for chat_id in CHAT_IDS:
+    try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {
-            "chat_id": chat_id,
+            "chat_id": CHAT_ID,
             "text": message,
             "parse_mode": "HTML"
         }
-        try:
-            response = requests.post(url, json=payload)
-            print(f"تم الإرسال إلى {chat_id}: {response.status_code}")
-            return True
-        except Exception as e:
-            print(f"خطأ أثناء الإرسال إلى {chat_id}: {e}")
-            return False
+        
+        response = requests.post(url, json=payload)
+        print(f"✅ تم الإرسال إلى {CHAT_ID}: {response.status_code}")
+        return response.status_code == 200
+        
+    except Exception as e:
+        print(f"❌ خطأ في إرسال التليجرام: {e}")
+        return False
 
 # 🔹 تحميل قائمة الأسهم من ملف
 def load_stocks():
@@ -48,34 +49,12 @@ signal_memory = defaultdict(lambda: {
     "bearish": []
 })
 
-# 🔹 إرسال POST خارجي (معدل)
+# 🔹 إرسال POST خارجي (معدل - معطل مؤقتا)
 def send_post_request(message, indicators, signal_type=None):
-    url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
-    
-    # تحديد نوع الإشارة تلقائياً إذا لم يتم تحديده
-    if signal_type is None:
-        if "صعودي" in message or "🚀" in message:
-            signal_type = "BULLISH_SIGNAL"
-        elif "هبوطي" in message or "📉" in message:
-            signal_type = "BEARISH_SIGNAL"
-        else:
-            signal_type = "TRADING_SIGNAL"
-    
-    payload = {
-        "type": signal_type,  # نوع واضح للإشارة
-        "message": message,    # نص الرسالة الكامل
-        "extras": {
-            "indicators": indicators,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    }
-    try:
-        response = requests.post(url, json=payload)
-        print(f"✅ تم إرسال الطلب: {response.status_code}")
-        return True
-    except Exception as e:
-        print(f"❌ خطأ في الإرسال: {e}")
-        return False
+    print(f"📡 [EXTERNAL API DISABLED]: {message}")
+    print(f"📡 [Would send to]: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
+    print(f"📡 [Would send type]: {signal_type}")
+    return True  # نجاح وهمي للمتابعة
 
 # 🔹 تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
 def cleanup_signals():
@@ -89,17 +68,6 @@ def cleanup_signals():
         # تنظيف الذاكرة من الأسهم الفارغة
         if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish']:
             del signal_memory[symbol]
-
-# ✅ تحويل النص الخام إلى صياغة مرتبة
-def format_signal(signal_text, direction):
-    signal_lower = signal_text.lower()
-    if "upward" in signal_lower or "bullish" in signal_lower or "call" in signal_lower:
-        return f"🚀 {signal_text}"
-    elif "downward" in signal_lower or "bearish" in signal_lower or "put" in signal_lower:
-        return f"📉 {signal_text}"
-    else:
-        symbol = "🚀" if direction == "bullish" else "📉"
-        return f"{symbol} {signal_text}"
 
 # ✅ استخراج اسم السهم من الرسالة
 def extract_symbol(message):
@@ -270,11 +238,21 @@ def home():
         "timestamp": datetime.utcnow().isoformat()
     })
 
+# 🔹 اختبار التليجرام
+def test_telegram():
+    print("Testing Telegram...")
+    result = send_telegram_to_all("🔧 Test message from bot - System is working!")
+    print(f"Test result: {result}")
+    return result
+
 # 🔹 تشغيل التطبيق
 if __name__ == "__main__":
+    # اختبار التليجرام أولاً
+    test_telegram()
+    
     port = int(os.environ.get("PORT", 10000))
     print(f"🟢 Server started on port {port}")
-    print(f"🟢 Telegram receiver: {CHAT_IDS[0]}")
+    print(f"🟢 Telegram receiver: {CHAT_ID}")
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
     print("🟢 Waiting for TradingView webhooks...")
     app.run(host="0.0.0.0", port=port)
