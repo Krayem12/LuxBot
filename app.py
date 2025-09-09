@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 # 🔹 بيانات التليجرام لمستخدم واحد فقط
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9c"
-CHAT_IDS = ["624881400"]  # مستخدم واحد فقط
+CHAT_ID = "624881400"
 
 # 🔹 إرسال رسالة لمستخدم واحد
 def send_telegram_to_all(message):
