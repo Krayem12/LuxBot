@@ -7,9 +7,9 @@ import json
 
 app = Flask(__name__)
 
-# 🔹 بيانات التليجرام لمستخدم واحد فقط
-TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9c"
-CHAT_ID = "624881400"  # مستخدم واحد فقط
+# 🔹 بيانات التليجرام الصحيحة - تم التصحيح
+TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
+CHAT_ID = "624881400"
 
 # 🔹 إرسال رسالة لمستخدم واحد
 def send_telegram_to_all(message):
@@ -23,12 +23,19 @@ def send_telegram_to_all(message):
         
         response = requests.post(url, json=payload)
         print(f"✅ تم الإرسال إلى {CHAT_ID}: {response.status_code}")
-        return response.status_code == 200
         
+        if response.status_code == 200:
+            print("🎉 تم إرسال الرسالة بنجاح إلى التليجرام!")
+            return True
+        else:
+            print(f"❌ فشل إرسال الرسالة: {response.text}")
+            return False
+            
     except Exception as e:
         print(f"❌ خطأ في إرسال التليجرام: {e}")
         return False
 
+# ... (باقي الكود يبقى كما هو بدون تغيير)
 # 🔹 تحميل قائمة الأسهم من ملف
 def load_stocks():
     stocks = []
