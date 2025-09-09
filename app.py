@@ -7,7 +7,7 @@ import json
 
 app = Flask(__name__)
 
-# 🔹 بيانات التليجرام الصحيحة - تم التصحيح
+# 🔹 بيانات التليجرام الصحيحة
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
@@ -35,7 +35,6 @@ def send_telegram_to_all(message):
         print(f"❌ خطأ في إرسال التليجرام: {e}")
         return False
 
-# ... (باقي الكود يبقى كما هو بدون تغيير)
 # 🔹 تحميل قائمة الأسهم من ملف
 def load_stocks():
     stocks = []
@@ -44,7 +43,7 @@ def load_stocks():
             stocks = [line.strip().upper() for line in f if line.strip()]
     except FileNotFoundError:
         print("⚠️  ملف stocks.txt غير موجود. سيتم استخدام قائمة افتراضية.")
-        stocks = ["BTCUSDT", "ETHUSDT", "SPX500"]  # قائمة افتراضية
+        stocks = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30"]  # قائمة افتراضية
     return stocks
 
 # قائمة الأسهم
@@ -56,12 +55,49 @@ signal_memory = defaultdict(lambda: {
     "bearish": []
 })
 
-# 🔹 إرسال POST خارجي (معدل - معطل مؤقتا)
+# 🔹 إرسال POST خارجي (مفعّل بالكامل)
 def send_post_request(message, indicators, signal_type=None):
-    print(f"📡 [EXTERNAL API DISABLED]: {message}")
-    print(f"📡 [Would send to]: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
-    print(f"📡 [Would send type]: {signal_type}")
-    return True  # نجاح وهمي للمتابعة
+    url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
+    
+    # تحديد نوع الإشارة تلقائياً إذا لم يتم تحديده
+    if signal_type is None:
+        if "صعودي" in message or "🚀" in message or "bullish" in message.lower():
+            signal_type = "BULLISH_CONFIRMATION"
+        elif "هبوطي" in message or "📉" in message or "bearish" in message.lower():
+            signal_type = "BEARISH_CONFIRMATION"
+        else:
+            signal_type = "TRADING_SIGNAL"
+    
+    payload = {
+        "type": signal_type,
+        "message": message,
+        "extras": {
+            "indicators": indicators,
+            "timestamp": datetime.utcnow().isoformat(),
+            "source": "tradingview-bot"
+        }
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        print(f"✅ تم إرسال الطلب الخارجي: {response.status_code}")
+        
+        if response.status_code == 200:
+            print("🎉 تم إرسال البيانات بنجاح إلى الخادم الخارجي!")
+            return True
+        else:
+            print(f"❌ فشل الإرسال الخارجي: {response.status_code} - {response.text}")
+            return False
+            
+    except requests.exceptions.Timeout:
+        print("⏰ timeout الإرسال الخارجي: تجاوز الوقت المحدد")
+        return False
+    except requests.exceptions.ConnectionError:
+        print("🔌 فشل الاتصال بالخادم الخارجي")
+        return False
+    except Exception as e:
+        print(f"❌ خطأ في الإرسال الخارجي: {e}")
+        return False
 
 # 🔹 تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
 def cleanup_signals():
@@ -86,14 +122,16 @@ def extract_symbol(message):
             return symbol
     
     # إذا لم يتم العثور، البحث عن patterns معروفة
-    if "SPX" in message_upper:
+    if "SPX" in message_upper or "500" in message_upper:
         return "SPX500"
     elif "BTC" in message_upper:
         return "BTCUSDT" 
     elif "ETH" in message_upper:
         return "ETHUSDT"
-    elif "NASDAQ" in message_upper:
+    elif "NASDAQ" in message_upper or "100" in message_upper:
         return "NASDAQ100"
+    elif "DOW" in message_upper or "US30" in message_upper or "30" in message_upper:
+        return "US30"
     
     return "SPX500"  # افتراضي
 
@@ -150,8 +188,16 @@ def process_alerts(alerts):
                     message = f"📉 {symbol} - تأكيد انطلاق هبوطي ({signal_count} إشارات)"
                     signal_type = "BEARISH_CONFIRMATION"
                 
-                send_telegram_to_all(message)
-                send_post_request(message, f"{direction.upper()} signals", signal_type)
+                # إرسال إلى التليجرام
+                telegram_success = send_telegram_to_all(message)
+                
+                # إرسال إلى الخادم الخارجي
+                external_success = send_post_request(message, f"{direction.upper()} signals", signal_type)
+                
+                if telegram_success and external_success:
+                    print(f"🎉 تم إرسال التنبيه بنجاح لـ {symbol}")
+                else:
+                    print(f"⚠️ حدثت أخطاء جزئية في الإرسال لـ {symbol}")
                 
                 # مسح الإشارات بعد الإرسال
                 signal_memory[symbol][direction] = []
@@ -245,21 +291,29 @@ def home():
         "timestamp": datetime.utcnow().isoformat()
     })
 
-# 🔹 اختبار التليجرام
-def test_telegram():
-    print("Testing Telegram...")
-    result = send_telegram_to_all("🔧 Test message from bot - System is working!")
-    print(f"Test result: {result}")
-    return result
+# 🔹 اختبار التليجرام والخادم الخارجي
+def test_services():
+    print("Testing services...")
+    
+    # اختبار التليجرام
+    telegram_result = send_telegram_to_all("🔧 Test message from bot - System is working!")
+    print(f"Telegram test result: {telegram_result}")
+    
+    # اختبار الخادم الخارجي
+    external_result = send_post_request("Test message", "TEST_SIGNAL", "TEST")
+    print(f"External API test result: {external_result}")
+    
+    return telegram_result and external_result
 
 # 🔹 تشغيل التطبيق
 if __name__ == "__main__":
-    # اختبار التليجرام أولاً
-    test_telegram()
+    # اختبار الخدمات أولاً
+    test_services()
     
     port = int(os.environ.get("PORT", 10000))
     print(f"🟢 Server started on port {port}")
     print(f"🟢 Telegram receiver: {CHAT_ID}")
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
+    print(f"🟢 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
     print("🟢 Waiting for TradingView webhooks...")
     app.run(host="0.0.0.0", port=port)
