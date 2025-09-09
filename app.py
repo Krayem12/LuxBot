@@ -3,6 +3,7 @@ import requests
 from datetime import datetime, timedelta
 import os
 from collections import defaultdict
+import json
 
 app = Flask(__name__)
 
@@ -21,7 +22,7 @@ def send_telegram_to_all(message):
         payload = {
             "chat_id": chat_id,
             "text": message,
-            "parse_mode": "HTML"  # لدعم التنسيق
+            "parse_mode": "HTML"
         }
         try:
             response = requests.post(url, json=payload)
@@ -66,22 +67,26 @@ def send_post_request(message, indicators):
 # 🔹 تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
 def cleanup_signals():
     cutoff = datetime.utcnow() - timedelta(minutes=15)
-    for symbol in STOCK_LIST:
+    for symbol in list(signal_memory.keys()):
         for direction in ["bullish", "bearish"]:
             signal_memory[symbol][direction] = [
                 (sig, ts) for sig, ts in signal_memory[symbol][direction] 
                 if ts > cutoff
             ]
+        # تنظيف الذاكرة من الأسهم الفارغة
+        if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish']:
+            del signal_memory[symbol]
 
 # ✅ تحويل النص الخام إلى صياغة مرتبة
 def format_signal(signal_text, direction):
-    if "upward" in signal_text.lower():
-        return f"Hyper Wave oscillator upward signal 🚀"
-    elif "downward" in signal_text.lower():
-        return f"Hyper Wave oscillator downward signal 📉"
+    signal_lower = signal_text.lower()
+    if "upward" in signal_lower or "bullish" in signal_lower or "call" in signal_lower:
+        return f"🚀 {signal_text}"
+    elif "downward" in signal_lower or "bearish" in signal_lower or "put" in signal_lower:
+        return f"📉 {signal_text}"
     else:
         symbol = "🚀" if direction == "bullish" else "📉"
-        return f"{signal_text} {symbol}"
+        return f"{symbol} {signal_text}"
 
 # ✅ استخراج اسم السهم من الرسالة
 def extract_symbol(message):
@@ -89,80 +94,159 @@ def extract_symbol(message):
     for symbol in STOCK_LIST:
         if symbol in message_upper:
             return symbol
-    return "UNKNOWN"  # إذا لم يتم العثور على أي سهم معروف
+    return "UNKNOWN"
 
 # ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
     now = datetime.utcnow()
+    print(f"🔍 Processing {len(alerts)} alerts")
 
     for alert in alerts:
-        signal = alert.get("signal", "").strip()
-        direction = alert.get("direction", "bullish").strip()
-        indicator = alert.get("indicator", "Raw Text").strip()
-        
-        # استخراج السهم من الرسالة
-        symbol = extract_symbol(signal)
-        if symbol == "UNKNOWN":
-            continue  # تخطي إذا لم يتعرف على السهم
+        if isinstance(alert, dict):
+            signal = alert.get("signal", alert.get("message", "")).strip()
+            direction = alert.get("direction", "bullish").strip().lower()
+            ticker = alert.get("ticker", "")
+        else:
+            signal = str(alert).strip()
+            direction = "bullish"
+            ticker = ""
 
-        # صياغة الإشارة
-        formatted_signal = format_signal(signal, direction)
+        # استخراج السهم إذا لم يكن موجودًا
+        if not ticker or ticker == "UNKNOWN":
+            ticker = extract_symbol(signal)
 
-        # مفتاح فريد يجمع formatted_signal + indicator + direction
-        unique_key = f"{formatted_signal}_{indicator}_{direction}"
+        if ticker == "UNKNOWN":
+            print(f"⚠️ Could not extract symbol from: {signal}")
+            continue
 
-        # تخزين الإشارة للسم المحدد
-        if unique_key not in [s for s, _ in signal_memory[symbol][direction]]:
-            signal_memory[symbol][direction].append((unique_key, now))
+        # تحديد الاتجاه تلقائياً من الإشارة
+        signal_lower = signal.lower()
+        if "bearish" in signal_lower or "down" in signal_lower or "put" in signal_lower or "short" in signal_lower:
+            direction = "bearish"
+        else:
+            direction = "bullish"
+
+        # تخزين الإشارة
+        if ticker not in signal_memory:
+            signal_memory[ticker] = {"bullish": [], "bearish": []}
+
+        unique_key = f"{signal}_{now.timestamp()}"
+        signal_memory[ticker][direction].append((unique_key, now))
+        print(f"✅ Stored {direction} signal for {ticker}: {signal}")
 
     # تنظيف الإشارات القديمة
     cleanup_signals()
 
     # التحقق من إشارات كل سهم
-    for symbol in STOCK_LIST:
-        # تحقق من إشارات الصعود
-        if len(signal_memory[symbol]["bullish"]) >= 2:
-            signals = [s.split("_")[0] for s, _ in signal_memory[symbol]["bullish"]]
-            telegram_message = f"{symbol} CALL 🚀 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
-            send_post_request(telegram_message, " + ".join(signals))
-            send_telegram_to_all(telegram_message)  # الإرسال للجميع
+    for symbol, signals in signal_memory.items():
+        for direction in ["bullish", "bearish"]:
+            if len(signals[direction]) >= 2:
+                signal_count = len(signals[direction])
+                if direction == "bullish":
+                    message = f"🚀 {symbol} - تأكيد انطلاق صعودي ({signal_count} إشارات)"
+                else:
+                    message = f"📉 {symbol} - تأكيد انطلاق هبوطي ({signal_count} إشارات)"
+                
+                send_telegram_to_all(message)
+                send_post_request(message, f"{direction.upper()} signals")
+                
+                # مسح الإشارات بعد الإرسال
+                signal_memory[symbol][direction] = []
+                print(f"📤 Sent alert for {symbol} ({direction})")
 
-        # تحقق من إشارات الهبوط
-        if len(signal_memory[symbol]["bearish"]) >= 2:
-            signals = [s.split("_")[0] for s, _ in signal_memory[symbol]["bearish"]]
-            telegram_message = f"{symbol} PUT 📉 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
-            send_post_request(telegram_message, " + ".join(signals))
-            send_telegram_to_all(telegram_message)  # الإرسال للجميع
+# 🔹 تسجيل معلومات الطلب الوارد (للت Debug)
+@app.before_request
+def log_request_info():
+    if request.path == '/webhook':
+        print(f"\n🌐 Incoming request: {request.method} {request.path}")
+        print(f"🌐 Content-Type: {request.content_type}")
+        print(f"🌐 Headers: { {k: v for k, v in request.headers.items() if k.lower() not in ['authorization', 'cookie']} }")
 
-# ✅ استقبال الويب هوك
+# ✅ استقبال الويب هوك (محدث)
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
         alerts = []
+        raw_data = None
 
-        if request.is_json:
-            data = request.get_json(force=True)
-            print("Received JSON webhook:", data)
-            alerts = data.get("alerts", [])
-        else:
-            raw = request.data.decode("utf-8").strip()
-            print("Received raw webhook:", raw)
-            if raw:
-                alerts = [{"signal": raw, "indicator": "Raw Text", "message": raw, "direction": "bullish"}]
+        # تسجيل البيانات الخام
+        try:
+            raw_data = request.get_data(as_text=True).strip()
+            print(f"📨 Received raw webhook data: '{raw_data}'")
+            
+            # محاولة تحليل JSON
+            if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
+                try:
+                    data = json.loads(raw_data)
+                    print(f"📊 Parsed JSON data: {data}")
+                    
+                    if isinstance(data, dict):
+                        if "alerts" in data:
+                            alerts = data["alerts"]
+                        else:
+                            alerts = [data]  # معالجة ككائن مباشر
+                    elif isinstance(data, list):
+                        alerts = data
+                        
+                except json.JSONDecodeError as e:
+                    print(f"❌ JSON decode error: {e}")
+                    # الاستمرار بالمعالجة كنص عادي
+                    
+            elif raw_data:
+                # معالجة كرسالة نصية مباشرة
+                alerts = [{"signal": raw_data, "raw_data": raw_data}]
+                
+        except Exception as parse_error:
+            print(f"❌ Raw data parse error: {parse_error}")
 
+        # الطريقة التقليدية لطلب JSON
+        if not alerts and request.is_json:
+            try:
+                data = request.get_json(force=True)
+                print(f"📊 Received JSON webhook: {data}")
+                alerts = data.get("alerts", [])
+                if not alerts and data:
+                    alerts = [data]
+            except Exception as json_error:
+                print(f"❌ JSON parse error: {json_error}")
+
+        # إذا لم يكن هناك alerts، استخدام البيانات الخام
+        if not alerts and raw_data:
+            alerts = [{"signal": raw_data, "raw_data": raw_data}]
+
+        print(f"🔍 Processing {len(alerts)} alert(s)")
+        
         if alerts:
             process_alerts(alerts)
-            return jsonify({"status": "alert_processed"}), 200
+            return jsonify({
+                "status": "alert_processed", 
+                "count": len(alerts),
+                "timestamp": datetime.utcnow().isoformat()
+            }), 200
         else:
+            print("⚠️ No valid alerts found in webhook")
             return jsonify({"status": "no_alerts"}), 200
 
     except Exception as e:
-        print("Error:", e)
+        print(f"❌ Error in webhook: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 400
+
+# 🔹 صفحة الرئيسية للفحص
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "running",
+        "message": "TradingView Webhook Receiver is active",
+        "monitored_stocks": STOCK_LIST,
+        "active_signals": {k: v for k, v in signal_memory.items()},
+        "timestamp": datetime.utcnow().isoformat()
+    })
 
 # 🔹 تشغيل التطبيق
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
+    print(f"🟢 Server started on port {port}")
+    print(f"🟢 Telegram receivers: {len(CHAT_IDS)}")
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
-    print(f"🟢 Sending to {len(CHAT_IDS)} chat rooms")
+    print("🟢 Waiting for TradingView webhooks...")
     app.run(host="0.0.0.0", port=port)
