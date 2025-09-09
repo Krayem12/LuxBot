@@ -202,7 +202,7 @@ def process_alerts(alerts):
     # التحقق من إشارات كل سهم - إشارة واحدة تكفي
     for symbol, signals in signal_memory.items():
         for direction in ["bullish", "bearish"]:
-            if len(signals[direction]) >= 1:  # إشارة واحدة تكفي
+            if len(signals[direction]) >= 2:  # إشارة واحدة تكفي
                 signal_count = len(signals[direction])
                 
                 # استخراج اسم الإشارة من آخر إشارة مخزنة
