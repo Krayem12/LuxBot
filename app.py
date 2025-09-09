@@ -1,157 +1,102 @@
 from flask import Flask, request, jsonify
 import requests
-from datetime import datetime, timedelta
 import os
-from collections import defaultdict
 
-app = Flask(__name__)
+app = Flask(_name_)
 
 # 🔹 بيانات التليجرام
-TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9c"
+TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# 🔹 تحميل قائمة الأسهم من ملف
-def load_stocks():
-    stocks = []
-    try:
-        with open('stocks.txt', 'r') as f:
-            stocks = [line.strip().upper() for line in f if line.strip()]
-    except FileNotFoundError:
-        print("⚠️  ملف stocks.txt غير موجود. سيتم استخدام قائمة افتراضية.")
-        stocks = ["BTCUSDT", "ETHUSDT"]  # قائمة افتراضية
-    return stocks
-
-# قائمة الأسهم
-STOCK_LIST = load_stocks()
-
-# 🔹 ذاكرة مؤقتة لتخزين الإشارات لكل سهم
-signal_memory = defaultdict(lambda: {
-    "bullish": [],
-    "bearish": []
-})
-
-# 🔹 إرسال رسالة للتليجرام
-def send_telegram(message):
+# ✅ إرسال رسالة للتليجرام
+def send_telegram(message: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
     try:
-        requests.post(url, json=payload)
+        r = requests.post(url, json=payload)
+        print("📤 Payload to Telegram:", payload)
+        print("📥 Telegram response:", r.status_code, r.text)
     except Exception as e:
-        print("خطأ أثناء إرسال التليجرام:", e)
+        print("❌ خطأ أثناء إرسال التليجرام:", e)
 
-# 🔹 إرسال POST خارجي
+# ✅ إرسال POST خارجي
 def send_post_request(message, indicators):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     payload = {
         "type": message,
-        "extras": {
-            "indicators": indicators
-        }
+        "extras": indicators
     }
     try:
-        requests.post(url, json=payload)
+        r = requests.post(url, json=payload)
+        print("📤 Payload to external POST:", payload)
+        print("📥 Response:", r.status_code, r.text)
     except Exception as e:
-        print("خطأ أثناء إرسال POST:", e)
+        print("❌ خطأ أثناء إرسال POST:", e)
 
-# 🔹 تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
-def cleanup_signals():
-    cutoff = datetime.utcnow() - timedelta(minutes=15)
-    for symbol in STOCK_LIST:
-        for direction in ["bullish", "bearish"]:
-            signal_memory[symbol][direction] = [
-                (sig, ts) for sig, ts in signal_memory[symbol][direction] 
-                if ts > cutoff
-            ]
-
-# ✅ تحويل النص الخام إلى صياغة مرتبة
-def format_signal(signal_text, direction):
-    if "upward" in signal_text.lower():
-        return f"Hyper Wave oscillator upward signal 🚀"
-    elif "downward" in signal_text.lower():
-        return f"Hyper Wave oscillator downward signal 📉"
-    else:
-        symbol = "🚀" if direction == "bullish" else "📉"
-        return f"{signal_text} {symbol}"
-
-# ✅ استخراج اسم السهم من الرسالة
-def extract_symbol(message):
-    message_upper = message.upper()
-    for symbol in STOCK_LIST:
-        if symbol in message_upper:
-            return symbol
-    return "UNKNOWN"  # إذا لم يتم العثور على أي سهم معروف
-
-# ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
-def process_alerts(alerts):
-    now = datetime.utcnow()
-
-    for alert in alerts:
-        signal = alert.get("signal", "").strip()
-        direction = alert.get("direction", "bullish").strip()
-        indicator = alert.get("indicator", "Raw Text").strip()
-        
-        # استخراج السهم من الرسالة
-        symbol = extract_symbol(signal)
-        if symbol == "UNKNOWN":
-            continue  # تخطي إذا لم يتعرف على السهم
-
-        # صياغة الإشارة
-        formatted_signal = format_signal(signal, direction)
-
-        # مفتاح فريد يجمع formatted_signal + indicator + direction
-        unique_key = f"{formatted_signal}_{indicator}_{direction}"
-
-        # تخزين الإشارة للسم المحدد
-        if unique_key not in [s for s, _ in signal_memory[symbol][direction]]:
-            signal_memory[symbol][direction].append((unique_key, now))
-
-    # تنظيف الإشارات القديمة
-    cleanup_signals()
-
-    # التحقق من إشارات كل سهم
-    for symbol in STOCK_LIST:
-        # تحقق من إشارات الصعود
-        if len(signal_memory[symbol]["bullish"]) >= 2:
-            signals = [s.split("_")[0] for s, _ in signal_memory[symbol]["bullish"]]
-            telegram_message = f"{symbol} CALL 🚀 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
-            send_post_request(telegram_message, " + ".join(signals))
-            send_telegram(telegram_message)
-
-        # تحقق من إشارات الهبوط
-        if len(signal_memory[symbol]["bearish"]) >= 2:
-            signals = [s.split("_")[0] for s, _ in signal_memory[symbol]["bearish"]]
-            telegram_message = f"{symbol} PUT 📉 ({len(signals)} Signals in 15m)\n" + "\n".join(signals)
-            send_post_request(telegram_message, " + ".join(signals))
-            send_telegram(telegram_message)
+# ✅ مسار الترحيب
+@app.route("/", methods=["GET"])
+def home():
+    return "🟢 LuxAlgo Webhook Bot is running!"
 
 # ✅ استقبال الويب هوك
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        alerts = []
+        data = request.get_json(force=False, silent=True)
+        
+        if not data:
+            data_text = request.data.decode("utf-8")
+            print("✅ Received raw webhook:", data_text)
+            send_telegram(f"📊 Raw alert:\n{data_text}")
+            return jsonify({"status": "raw_alert_sent"}), 200
 
-        if request.is_json:
-            data = request.get_json(force=True)
-            print("Received JSON webhook:", data)
-            alerts = data.get("alerts", [])
-        else:
-            raw = request.data.decode("utf-8").strip()
-            print("Received raw webhook:", raw)
-            if raw:
-                alerts = [{"signal": raw, "indicator": "Raw Text", "message": raw, "direction": "bullish"}]
+        print("✅ Received webhook JSON:", data)
+        alerts = data.get("alerts", [])
 
-        if alerts:
-            process_alerts(alerts)
-            return jsonify({"status": "alert_processed"}), 200
-        else:
-            return jsonify({"status": "no_alerts"}), 200
+        if not alerts:
+            return jsonify({"status": "no_alerts"}), 400
+
+        # معالجة كل التنبيهات
+        for alert in alerts:
+            indicator = alert.get("indicator", "N/A")
+            signal = alert.get("signal", "N/A")
+            message = alert.get("message", "N/A")
+            ticker = alert.get("ticker", "N/A")
+            open_price = alert.get("open", "N/A")
+            high = alert.get("high", "N/A")
+            low = alert.get("low", "N/A")
+            close = alert.get("close", "N/A")
+            volume = alert.get("volume", "N/A")
+            barcolor = alert.get("barcolor", "N/A")
+            bar_index = alert.get("bar_index", "N/A")
+            hour = alert.get("hour", "N/A")
+            minute = alert.get("minute", "N/A")
+            telegram_message = (
+                f"🚨 Signal Alert\n"
+                f"🔹 Ticker: {ticker}\n"
+                f"🔹 Indicator: {indicator}\n"
+                f"🔹 Signal: {signal}\n"
+                f"🔹 Message: {message}\n"
+                f"🔹 OHLC: {open_price}/{high}/{low}/{close}\n"
+                f"🔹 Volume: {volume}\n"
+                f"🔹 Barcolor: {barcolor}\n"
+                f"🔹 Bar Index: {bar_index} | Time: {hour}:{minute}"
+            )
+            
+            data_indicators = {"indicator": indicator, "signal": signal, "message": message, "ticker": ticker, "open_price": open_price, "high": high, "low": low, "close": close, "volume": volume, "barcolor": barcolor, "bar_index": bar_index, "hour": hour, "minute": minute}
+            # إرسال للـ POST الخارجي
+            send_post_request(message, data_indicators)
+
+            # إرسال للتليجرام
+            send_telegram(telegram_message)
+
+        return jsonify({"status": "alerts_sent"}), 200
 
     except Exception as e:
-        print("Error:", e)
-        return jsonify({"status": "error", "message": str(e)}), 400
+        print("❌ Error:", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-# 🔹 تشغيل التطبيق
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
+# ✅ تشغيل التطبيق مع المنفذ المرن
+if _name_ == "_main_":
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
