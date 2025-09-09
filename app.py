@@ -38,7 +38,7 @@ def load_stocks():
             stocks = [line.strip().upper() for line in f if line.strip()]
     except FileNotFoundError:
         print("⚠️  ملف stocks.txt غير موجود. سيتم استخدام قائمة افتراضية.")
-        stocks = ["BTCUSDT", "ETHUSDT"]  # قائمة افتراضية
+        stocks = ["BTCUSDT", "ETHUSDT", "SPX500"]  # قائمة افتراضية
     return stocks
 
 # قائمة الأسهم
@@ -50,19 +50,34 @@ signal_memory = defaultdict(lambda: {
     "bearish": []
 })
 
-# 🔹 إرسال POST خارجي
-def send_post_request(message, indicators):
+# 🔹 إرسال POST خارجي (معدل)
+def send_post_request(message, indicators, signal_type=None):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
+    
+    # تحديد نوع الإشارة تلقائياً إذا لم يتم تحديده
+    if signal_type is None:
+        if "صعودي" in message or "🚀" in message:
+            signal_type = "BULLISH_SIGNAL"
+        elif "هبوطي" in message or "📉" in message:
+            signal_type = "BEARISH_SIGNAL"
+        else:
+            signal_type = "TRADING_SIGNAL"
+    
     payload = {
-        "type": message,
+        "type": signal_type,  # نوع واضح للإشارة
+        "message": message,    # نص الرسالة الكامل
         "extras": {
-            "indicators": indicators
+            "indicators": indicators,
+            "timestamp": datetime.utcnow().isoformat()
         }
     }
     try:
-        requests.post(url, json=payload)
+        response = requests.post(url, json=payload)
+        print(f"✅ تم إرسال الطلب: {response.status_code}")
+        return True
     except Exception as e:
-        print("خطأ أثناء إرسال POST:", e)
+        print(f"❌ خطأ في الإرسال: {e}")
+        return False
 
 # 🔹 تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
 def cleanup_signals():
@@ -144,11 +159,13 @@ def process_alerts(alerts):
                 signal_count = len(signals[direction])
                 if direction == "bullish":
                     message = f"🚀 {symbol} - تأكيد انطلاق صعودي ({signal_count} إشارات)"
+                    signal_type = "BULLISH_CONFIRMATION"
                 else:
                     message = f"📉 {symbol} - تأكيد انطلاق هبوطي ({signal_count} إشارات)"
+                    signal_type = "BEARISH_CONFIRMATION"
                 
                 send_telegram_to_all(message)
-                send_post_request(message, f"{direction.upper()} signals")
+                send_post_request(message, f"{direction.upper()} signals", signal_type)
                 
                 # مسح الإشارات بعد الإرسال
                 signal_memory[symbol][direction] = []
