@@ -7,9 +7,16 @@ import json
 
 app = Flask(__name__)
 
+# 🔹 إعداد التوقيت السعودي (UTC+3)
+TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
+
 # 🔹 بيانات التليجرام الصحيحة
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
+
+# 🔹 الحصول على التوقيت السعودي
+def get_saudi_time():
+    return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
 
 # 🔹 إرسال رسالة لمستخدم واحد
 def send_telegram_to_all(message):
@@ -21,16 +28,23 @@ def send_telegram_to_all(message):
             "parse_mode": "HTML"
         }
         
-        response = requests.post(url, json=payload)
+        # ⏰ timeout قصير لتجنب تجميد الخادم
+        response = requests.post(url, json=payload, timeout=5)
         print(f"✅ تم الإرسال إلى {CHAT_ID}: {response.status_code}")
         
         if response.status_code == 200:
             print("🎉 تم إرسال الرسالة بنجاح إلى التليجرام!")
             return True
         else:
-            print(f"❌ فشل إرسال الرسالة: {response.text}")
+            print(f"❌ فشل إرسال الرسالة: {response.status_code}")
             return False
             
+    except requests.exceptions.Timeout:
+        print("⏰ timeout التليجرام: تجاوز الوقت المحدد (5 ثواني)")
+        return False
+    except requests.exceptions.ConnectionError:
+        print("🔌 فشل الاتصال بالتليجرام")
+        return False
     except Exception as e:
         print(f"❌ خطأ في إرسال التليجرام: {e}")
         return False
@@ -79,7 +93,7 @@ def send_post_request(message, indicators, signal_type=None):
     }
     
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=5)
         print(f"✅ تم إرسال الطلب الخارجي: {response.status_code}")
         
         if response.status_code == 200:
@@ -209,12 +223,15 @@ def process_alerts(alerts):
                 last_signal = signals[direction][-1][0] if signals[direction] else "إشارة"
                 signal_name = extract_signal_name(last_signal)
                 
+                # الحصول على التوقيت السعودي
+                saudi_time = get_saudi_time()
+                
                 if direction == "bullish":
                     message = f"""🚀 <b>{symbol} - إشارة صعودية</b>
 
 📊 <b>نوع الإشارة:</b> {signal_name}
 🔢 <b>عدد الإشارات:</b> {signal_count}
-⏰ <b>الوقت:</b> {datetime.now().strftime('%H:%M:%S')}
+⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
 <code>انطلاق صعودي متوقع</code>"""
                     signal_type = "BULLISH_CONFIRMATION"
@@ -223,7 +240,7 @@ def process_alerts(alerts):
 
 📊 <b>نوع الإشارة:</b> {signal_name}
 🔢 <b>عدد الإشارات:</b> {signal_count}
-⏰ <b>الوقت:</b> {datetime.now().strftime('%H:%M:%S')}
+⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
 <code>انطلاق هبوطي متوقع</code>"""
                     signal_type = "BEARISH_CONFIRMATION"
@@ -329,7 +346,7 @@ def home():
         "status": "running",
         "message": "TradingView Webhook Receiver is active",
         "monitored_stocks": STOCK_LIST,
-        "active_signals": {k: v for k, v in signal_memory.items()},
+        "active_signals": {k, v for k, v in signal_memory.items()},
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -356,6 +373,7 @@ if __name__ == "__main__":
     print(f"🟢 Server started on port {port}")
     print(f"🟢 Telegram receiver: {CHAT_ID}")
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
+    print(f"🟢 Saudi Timezone: UTC+{TIMEZONE_OFFSET}")
     print(f"🟢 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
     print("🟢 Waiting for TradingView webhooks...")
     app.run(host="0.0.0.0", port=port)
