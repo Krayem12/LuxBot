@@ -173,8 +173,9 @@ def determine_signal_direction(signal_text, original_direction=""):
     print("⚠️  Could not determine direction, defaulting to bullish")
     return "bullish"
 
+# ✅ استخراج اسم الإشارة من الرسالة
 def extract_signal_name(signal_text):
-    """استخراج اسم الإشارة مع التأكد من دقة التصنيف"""
+    """استخراج اسم الإشارة مع الاحتفاظ بالنص الأصلي"""
     signal_lower = signal_text.lower()
     
     # LuxAlgo HyperTH
@@ -201,13 +202,10 @@ def extract_signal_name(signal_text):
             return "بريميوم صعودي"
         return "بريميوم"
     
-    # إشارات عامة
-    if any(term in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع"]):
-        return "إشارة هبوطية"
-    elif any(term in signal_lower for term in ["bullish", "long", "buy", "صعودي", "شراء"]):
-        return "إشارة صعودية"
-    
-    return "إشارة غير معروفة"
+    # إرجاع النص الأصلي مختصراً إذا كان طويلاً
+    if len(signal_text) > 50:
+        return signal_text[:50] + "..."
+    return signal_text
 
 def process_alerts(alerts):
     now = datetime.utcnow()
@@ -244,7 +242,8 @@ def process_alerts(alerts):
                 'text': signal_text,
                 'timestamp': now,
                 'direction': direction,
-                'name': extract_signal_name(signal_text)
+                'name': extract_signal_name(signal_text),
+                'original_text': signal_text  # حفظ النص الأصلي
             }
             
             # التحقق من التكرار (نفس النص في آخر 5 دقائق)
@@ -275,15 +274,23 @@ def process_alerts(alerts):
         for direction in ["bullish", "bearish"]:
             if len(signals[direction]) >= REQUIRED_SIGNALS:
                 signal_count = len(signals[direction])
-                signal_names = [sig['name'] for sig in signals[direction]]
+                
+                # عرض النصوص الأصلية للإشارات
+                signal_details = []
+                for i, sig in enumerate(signals[direction], 1):
+                    # تقصير النص إذا كان طويلاً
+                    display_text = sig['original_text']
+                    if len(display_text) > 60:
+                        display_text = display_text[:60] + "..."
+                    signal_details.append(f"{i}. {display_text}")
                 
                 saudi_time = get_saudi_time()
                 
                 if direction == "bullish":
                     message = f"""🚀 <b>{symbol} - تأكيد إشارة صعودية</b>
 
-📊 <b>الإشارات المجمعة:</b>
-{chr(10).join([f'• {name}' for name in signal_names])}
+📊 <b>الإشارات المستلمة:</b>
+{chr(10).join(signal_details)}
 
 🔢 <b>عدد الإشارات:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
@@ -292,8 +299,8 @@ def process_alerts(alerts):
                 else:
                     message = f"""📉 <b>{symbol} - تأكيد إشارة هبوطية</b>
 
-📊 <b>الإشارات المجمعة:</b>
-{chr(10).join([f'• {name}' for name in signal_names])}
+📊 <b>الإشارات المستلمة:</b>
+{chr(10).join(signal_details)}
 
 🔢 <b>عدد الإشارات:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
