@@ -310,7 +310,7 @@ def extract_signal_name(raw_signal):
         "liquidity grab", "grab liquidity", "جذب السيولة"
     ]
     if any(term in signal_lower for term in advanced_terms):
-        if "order" in signal_lower or "block" in signal极ower or "كتلة" in signal_lower:
+        if "order" in signal_lower or "block" in signal_lower or "كتلة" in signal_lower:
             if any(term in signal_lower for term in ["bullish", "صعودي", "buy", "شراء"]):
                 return "كتلة أوامر صعودية"
             elif any(term in signal_lower for term in ["bearish", "هبوطي", "sell", "بيع"]):
@@ -337,7 +337,7 @@ def extract_signal_name(raw_signal):
     # ✅ General Signals - إشارات عامة
     if any(term in signal_lower for term in ["bullish", "long", "buy", "صعودي", "شراء", "صاعد"]):
         return "إشارة صعودية"
-    elif any(term极 in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع", "هابط"]):
+    elif any(term in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع", "هابط"]):
         return "إشارة هبوطية"
     
     # ✅ Default - الإشارة الأصلية
@@ -394,7 +394,7 @@ def process_alerts(alerts):
 
         # تخزين الإشارة مع الطابع الزمني
         signal_memory[ticker][direction].append((unique_key, now))
-        print(f"✅ Stored {direction} signal for {极icker}: '{signal}' (unique_key: '{unique_key}')")
+        print(f"✅ Stored {direction} signal for {ticker}: '{signal}' (unique_key: '{unique_key}')")
 
     # تنظيف الإشارات القديمة
     cleanup_signals()
@@ -428,7 +428,7 @@ def process_alerts(alerts):
 🔢 <b>عدد الإشارات:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
-极<code>انطلاق هبوطي متوقع</code>"""
+<code>انطلاق هبوطي متوقع</code>"""
                     signal_type = "BEARISH_CONFIRMATION"
                 
                 # إرسال إلى التليجرام (مع تنسيق HTML)
@@ -466,13 +466,13 @@ def webhook():
         # تسجيل البيانات الخام
         try:
             raw_data = request.get_data(as_text=True).strip()
-            print(f极"📨 Received raw webhook data: '{raw_data}'")
+            print(f"📨 Received raw webhook data: '{raw_data}'")
             
             # محاولة تحليل JSON
             if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
                 try:
                     data = json.loads(raw_data)
-                    print(f"📊 Parsed JSON data极: {data}")
+                    print(f"📊 Parsed JSON data: {data}")
                     
                     if isinstance(data, dict):
                         if "alerts" in data:
@@ -500,7 +500,7 @@ def webhook():
                 print(f"📊 Received JSON webhook: {data}")
                 alerts = data.get("alerts", [])
                 if not alerts and data:
-                    alerts极 = [data]
+                    alerts = [data]
             except Exception as json_error:
                 print(f"❌ JSON parse error: {json_error}")
 
@@ -559,7 +559,7 @@ if __name__ == "__main__":
     print(f"🟢 Server started on port {port}")
     print(f"🟢 Telegram receiver: {CHAT_ID}")
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
-    print(f"🟢 Saudi Timezone: UTC+{TIME极ONE_OFFSET}")
+    print(f"🟢 Saudi Timezone: UTC+{TIMEZONE_OFFSET}")
     print(f"🟢 Required signals: {REQUIRED_SIGNALS}")
     print(f"🟢 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
     print("🟢 Waiting for TradingView webhooks...")
