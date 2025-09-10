@@ -72,21 +72,14 @@ signal_memory = defaultdict(lambda: {
     "bearish": []
 })
 
-# 🔹 إرسال POST خارجي (معدل لقيم type المتوقعة)
+# 🔹 إرسال POST خارجي (معدل ليكون بنفس تنسيق رسالة التليجرام)
 def send_post_request(message, indicators, signal_type=None):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     
-    # تحويل type إلى القيم المتوقعة من الخادم الخارجي
-    if signal_type == "BULLISH_CONFIRMATION":
-        external_type = "bullish"  # القيمة التي يتوقعها الخادم
-    elif signal_type == "BEARISH_CONFIRMATION":
-        external_type = "bearish"  # القيمة التي يتوقعها الخادم
-    else:
-        external_type = signal_type.lower() if signal_type else "trading_signal"
-    
+    # استخدام نفس تنسيق رسالة التليجرام للخادم الخارجي
     payload = {
-        "type": external_type,  # استخدام القيمة المتوقعة
-        "message": message,
+        "text": message,
+        "parse_mode": "HTML",
         "extras": {
             "indicators": indicators,
             "timestamp": datetime.utcnow().isoformat(),
