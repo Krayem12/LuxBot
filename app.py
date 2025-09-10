@@ -155,28 +155,193 @@ def extract_symbol(message):
     
     return "SPX500"  # افتراضي
 
-# ✅ استخراج اسم الإشارة من الرسالة
+# ✅ استخراج اسم الإشارة من الرسالة (محدث لمؤشرات LuxAlgo بالإنجليزية والعربية)
 def extract_signal_name(raw_signal):
     signal_lower = raw_signal.lower()
     
-    if "bullish" in signal_lower and "bos" in signal_lower:
-        return "كسر هيكل صعودي"
-    elif "bearish" in signal_lower and "bos" in signal_lower:
-        return "كسر هيكل هبوطي"
-    elif "bullish" in signal_lower and "choch" in signal_lower:
-        return "تغير Character صعودي"
-    elif "bearish" in signal_lower and "choch" in signal_lower:
-        return "تغير Character هبوطي"
-    elif "bullish" in signal_lower and "confluence" in signal_lower:
-        return "تقارب صعودي قوي"
-    elif "bearish" in signal_lower and "confluence" in signal_lower:
-        return "تقارب هبوطي قوي"
-    elif "bullish" in signal_lower:
+    # ✅ LuxAlgo HYPERTH Signals - الإشارات المتقدمة (لا يوجد ترجمة رسمية)
+    hyperth_terms = [
+        "hyperth", "hyper_th", "hypert", "هايبيرث", "هيبرث", "هيبيرث",
+        "hyperth bullish", "hyperth long", "hyperth buy",
+        "hyperth bearish", "hyperth short", "hyperth sell",
+        "هايبيرث صعودي", "هايبيرث شراء", "هيبرث صاعد",
+        "هايبيرث هبوطي", "هايبيرث بيع", "هيبرث هابط"
+    ]
+    if any(term in signal_lower for term in hyperth_terms):
+        if any(term in signal_lower for term in ["bullish", "long", "buy", "صعودي", "شراء", "صاعد"]):
+            return "إشارة متقدمة صعودية (HYPERTH)"
+        elif any(term in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع", "هابط"]):
+            return "إشارة متقدمة هبوطية (HYPERTH)"
+        else:
+            return "إشارة متقدمة (HYPERTH)"
+    
+    # ✅ LuxAlgo Confirmation Signals - إشارات التأكيد
+    confirmation_terms = [
+        "bullish_confirmation", "bullish confirmation", "confirm bullish",
+        "bearish_confirmation", "bearish confirmation", "confirm bearish",
+        "تأكيد صعودي", "إشارة تأكيد صعودية", "تأكيد شراء",
+        "تأكيد هبوطي", "إشارة تأكيد هبوطية", "تأكيد بيع"
+    ]
+    if any(term in signal_lower for term in confirmation_terms):
+        if any(term in signal_lower for term in ["bullish", "صعودي", "صاعد", "شراء"]):
+            return "تأكيد إشارة صعودية"
+        elif any(term in signal_lower for term in ["bearish", "هبوطي", "هابط", "بيع"]):
+            return "تأكيد إشارة هبوطية"
+    
+    # ✅ LuxAlgo Contrarian Signals - إشارات انعكاسية (ضد الاتجاه)
+    contrarian_terms = [
+        "bullish_contrarian", "bullish contrarian", "contrarian bullish",
+        "bearish_contrarian", "bearish contrarian", "contrarian bearish",
+        "انعكاس صعودي", "إشارة عكسية صعودية", "ضد الاتجاه صعودي",
+        "انعكاس هبوطي", "إشارة عكسية هبوطية", "ضد الاتجاه هبوطي"
+    ]
+    if any(term in signal_lower for term in contrarian_terms):
+        if any(term in signal_lower for term in ["bullish", "صعودي", "صاعد"]):
+            return "إشارة انعكاسية صعودية"
+        elif any(term in signal_lower for term in ["bearish", "هبوطي", "هابط"]):
+            return "إشارة انعكاسية هبوطية"
+    
+    # ✅ LuxAlgo Smart Trail Signals - المؤشر الذكي للمسار
+    smart_trail_terms = [
+        "smart_trail", "smart trail", "المسار الذكي",
+        "bullish_smart_trail", "smart trail bullish",
+        "bearish_smart_trail", "smart trail bearish",
+        "المسار الذكي صعودي", "المسار الصاعد",
+        "المسار الذكي هبوطي", "المسار الهابط"
+    ]
+    if any(term in signal_lower for term in smart_trail_terms):
+        if any(term in signal_lower for term in ["bullish", "صعودي", "صاعد"]):
+            return "المسار الذكي صعودي"
+        elif any(term in signal_lower for term in ["bearish", "هبوطي", "هابط"]):
+            return "المسار الذكي هبوطي"
+    
+    # ✅ LuxAlgo Reversal Zones - مناطق الانعكاس
+    reversal_zones_terms = [
+        "reversal_zones", "reversal zones", "مناطق الانعكاس",
+        "rz_r1", "rz_r2", "rz_r3", "rz_s1", "rz_s2", "rz_s3",
+        "منطقة مقاومة", "منطقة دعم", "مناطق تحول"
+    ]
+    if any(term in signal_lower for term in reversal_zones_terms):
+        if any(term in signal_lower for term in ["bullish", "صعودي", "buy", "شراء"]):
+            return "منطقة انعكاس صعودية"
+        elif any(term in signal_lower for term in ["bearish", "هبوطي", "sell", "بيع"]):
+            return "منطقة انعكاس هبوطية"
+    
+    # ✅ LuxAlgo Trend Catcher/Tracer - مؤشر تحديد الاتجاه
+    trend_terms = [
+        "trend_catcher", "trend catcher", "محدد الاتجاه",
+        "trend_tracer", "trend tracer", "متابع الاتجاه",
+        "bullish_trend", "trend bullish", "اتجاه صعودي",
+        "bearish_trend", "trend bearish", "اتجاه هبوطي"
+    ]
+    if any(term in signal_lower for term in trend_terms):
+        if any(term in signal_lower for term in ["bullish", "صعودي", "صاعد"]):
+            return "مؤشر اتجاه صعودي"
+        elif any(term in signal_lower for term in ["bearish", "هبوطي", "هابط"]):
+            return "مؤشر اتجاه هبوطي"
+    
+    # ✅ LuxAlgo Neo Cloud - السحابة المتقدمة
+    neo_cloud_terms = [
+        "neo_cloud", "neo cloud", "السحابة المتقدمة",
+        "bullish_neo", "neo bullish", "سحابة صعودية",
+        "bearish_neo", "neo bearish", "سحابة هبوطية"
+    ]
+    if any(term in signal_lower for term in neo_cloud_terms):
+        if any(term in signal_lower for term in ["bullish", "صعودي", "صاعد"]):
+            return "السحابة المتقدمة صعودية"
+        elif any(term in signal_lower for term in ["bearish", "هبوطي", "هابط"]):
+            return "السحابة المتقدمة هبوطية"
+    
+    # ✅ LuxAlgo Oscillator Matrix - مصفوفة المذبذبات
+    oscillator_terms = [
+        "hyperwave", "هايبروايف", "موجة متقدمة",
+        "moneyflow", "تدفق الأموال", "حركة رأس المال",
+        "overflow", "فيضان", "تدفق زائد",
+        "confluence", "تقارب", "تزامن الإشارات",
+        "bullish_confluence", "confluence bullish", "تقارب صعودي",
+        "bearish_confluence", "confluence bearish", "تقارب هبوطي"
+    ]
+    if any(term in signal_lower for term in oscillator_terms):
+        if "confluence" in signal_lower or "تقارب" in signal_lower:
+            if any(term in signal_lower for term in ["bullish", "صعودي", "strong", "قوي"]):
+                return "تقارب إشارات صعودي قوي"
+            elif any(term in signal_lower for term in ["bearish", "هبوطي", "strong", "قوي"]):
+                return "تقارب إشارات هبوطي قوي"
+            elif any(term in signal_lower for term in ["bullish", "صعودي"]):
+                return "تقارب إشارات صعودي"
+            elif any(term in signal_lower for term in ["bearish", "هبوطي"]):
+                return "تقارب إشارات هبوطي"
+        elif "hyperwave" in signal_lower or "هايبروايف" in signal_lower:
+            return "إشارة موجة متقدمة"
+        elif "moneyflow" in signal_lower or "تدفق" in signal_lower:
+            return "إشارة تدفق الأموال"
+        elif "overflow" in signal_lower or "فيضان" in signal_lower:
+            return "إشارة تدفق زائد"
+    
+    # ✅ Price Action Concepts (BOS/CHOCH) - مفاهيم تحليل السعر
+    price_action_terms = [
+        "bullish bos", "bullish break of structure", "bos bullish",
+        "bearish bos", "bearish break of structure", "bos bearish",
+        "bullish choch", "bullish change of character", "choch bullish",
+        "bearish choch", "bearish change of character", "choch bearish",
+        "كسر هيكل صعودي", "كسر الهيكل الصاعد", "اختراق صعودي",
+        "كسر هيكل هبوطي", "كسر الهيكل الهابط", "اختراق هبوطي",
+        "تغير هيكل صعودي", "تغيير نمط صعودي", "تحول صعودي",
+        "تغير هيكل هبوطي", "تغيير نمط هبوطي", "تحول هبوطي"
+    ]
+    if any(term in signal_lower for term in price_action_terms):
+        if "bos" in signal_lower or "break" in signal_lower or "كسر" in signal_lower or "اختراق" in signal_lower:
+            if any(term in signal_lower for term in ["bullish", "صعودي", "صاعد"]):
+                return "كسر هيكل صعودي"
+            elif any(term in signal_lower for term in ["bearish", "هبوطي", "هابط"]):
+                return "كسر هيكل هبوطي"
+        elif "choch" in signal_lower or "change" in signal_lower or "تغير" in signal_lower or "تحول" in signal_lower:
+            if any(term in signal_lower for term in ["bullish", "صعودي", "صاعد"]):
+                return "تغير في الهيكل صعودي"
+            elif any(term in signal_lower for term in ["bearish", "هبوطي", "هابط"]):
+                return "تغير في الهيكل هبوطي"
+    
+    # ✅ Order Blocks & Liquidity - كتل الأوامر والسيولة
+    advanced_terms = [
+        "order_block", "order block", "كتلة أوامر",
+        "liquidity", "ликвидность", "سيولة",
+        "bullish ob", "ob bullish", "كتلة أوامر صعودية",
+        "bearish ob", "ob bearish", "كتلة أوامر هبوطية",
+        "liquidity grab", "grab liquidity", "جذب السيولة"
+    ]
+    if any(term in signal_lower for term in advanced_terms):
+        if "order" in signal_lower or "block" in signal_lower or "كتلة" in signal_lower:
+            if any(term in signal_lower for term in ["bullish", "صعودي", "buy", "شراء"]):
+                return "كتلة أوامر صعودية"
+            elif any(term in signal_lower for term in ["bearish", "هبوطي", "sell", "بيع"]):
+                return "كتلة أوامر هبوطية"
+        elif "liquidity" in signal_lower or "سيولة" in signal_lower:
+            if any(term in signal_lower for term in ["bullish", "صعودي"]):
+                return "جذب سيولة صعودي"
+            elif any(term in signal_lower for term in ["bearish", "هبوطي"]):
+                return "جذب سيولة هبوطي"
+    
+    # ✅ Exit Signals - إشارات الخروج
+    exit_terms = [
+        "exit_buy", "exit buy", "خروج شراء",
+        "exit_sell", "exit sell", "خروج بيع",
+        "خروج صعودي", "خروج من شراء",
+        "خروج هبوطي", "خروج من بيع"
+    ]
+    if any(term in signal_lower for term in exit_terms):
+        if any(term in signal_lower for term in ["buy", "شراء", "صعودي"]):
+            return "إشارة خروج من شراء"
+        elif any(term in signal_lower for term in ["sell", "بيع", "هبوطي"]):
+            return "إشارة خروج من بيع"
+    
+    # ✅ General Signals - إشارات عامة
+    if any(term in signal_lower for term in ["bullish", "long", "buy", "صعودي", "شراء", "صاعد"]):
         return "إشارة صعودية"
-    elif "bearish" in signal_lower:
+    elif any(term in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع", "هابط"]):
         return "إشارة هبوطية"
-    else:
-        return raw_signal  # إرجاع النص الأصلي إذا لم يتم التعرف
+    
+    # ✅ Default - الإشارة الأصلية
+    return raw_signal
 
 # ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
