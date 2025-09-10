@@ -171,7 +171,6 @@ def extract_symbol(message, original_ticker=""):
 def extract_signal_name(raw_signal):
     signal_lower = raw_signal.lower()
     
-    # ... (نفس محتوى extract_signal_name السابق)
     # LuxAlgo HYPERTH Signals
     hyperth_terms = [
         "hyperth", "hyper_th", "hypert", "هايبيرث", "هيبرث", "هيبيرث",
@@ -189,7 +188,45 @@ def extract_signal_name(raw_signal):
         else:
             return "إشارة متقدمة (HYPERTH)"
     
-    # ... (بقية إشارات LuxAlgo كما هي)
+    # LuxAlgo VIP Signals
+    vip_terms = [
+        "vip", "في أي بي", "فاي بي", "في اي بي",
+        "vip bullish", "vip long", "vip buy",
+        "vip bearish", "vip short", "vip sell",
+        "vip صعودي", "vip شراء", "vip صاعد",
+        "vip هبوطي", "vip بيع", "vip هابط"
+    ]
+    
+    if any(term in signal_lower for term in vip_terms):
+        if any(term in signal_lower for term in ["bullish", "long", "buy", "صعودي", "شراء", "صاعد"]):
+            return "إشارة VIP صعودية"
+        elif any(term in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع", "هابط"]):
+            return "إشارة VIP هبوطية"
+        else:
+            return "إشارة VIP"
+    
+    # LuxAlgo Premium Signals
+    premium_terms = [
+        "premium", "بريميوم", "بريميوم", "بريميم",
+        "premium bullish", "premium long", "premium buy",
+        "premium bearish", "premium short", "premium sell",
+        "بريميوم صعودي", "بريميوم شراء", "بريميوم صاعد",
+        "بريميوم هبوطي", "بريميوم بيع", "بريميوم هابط"
+    ]
+    
+    if any(term in signal_lower for term in premium_terms):
+        if any(term in signal_lower for term in ["bullish", "long", "buy", "صعودي", "شراء", "صاعد"]):
+            return "إشارة بريميوم صعودية"
+        elif any(term in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع", "هابط"]):
+            return "إشارة بريميوم هبوطية"
+        else:
+            return "إشارة بريميوم"
+    
+    # General signals
+    if any(term in signal_lower for term in ["bullish", "long", "buy", "صعودي", "شراء", "صاعد"]):
+        return "إشارة صعودية"
+    elif any(term in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع", "هابط"]):
+        return "إشارة هبوطية"
     
     return raw_signal  # الإشارة الأصلية إذا لم يتم التعرف
 
@@ -254,9 +291,11 @@ def process_alerts(alerts):
             if len(signals[direction]) >= REQUIRED_SIGNALS:
                 signal_count = len(signals[direction])
                 
-                # استخراج اسم الإشارة من آخر إشارة مخزنة
-                last_signal = signals[direction][-1][0] if signals[direction] else "إشارة"
-                signal_name = extract_signal_name(last_signal)
+                # استخراج أسماء جميع الإشارات المخزنة
+                signal_names = []
+                for sig, ts in signals[direction]:
+                    signal_name = extract_signal_name(sig)
+                    signal_names.append(signal_name)
                 
                 # الحصول على التوقيت السعودي
                 saudi_time = get_saudi_time()
@@ -264,7 +303,9 @@ def process_alerts(alerts):
                 if direction == "bullish":
                     message = f"""🚀 <b>{symbol} - إشارة صعودية</b>
 
-📊 <b>نوع الإشارة:</b> {signal_name}
+📊 <b>نوع الإشارات:</b>
+{chr(10).join([f'• {name}' for name in signal_names])}
+
 🔢 <b>عدد الإشارات:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
@@ -273,7 +314,9 @@ def process_alerts(alerts):
                 else:
                     message = f"""📉 <b>{symbol} - إشارة هبوطية</b>
 
-📊 <b>نوع الإشارة:</b> {signal_name}
+📊 <b>نوع الإشارات:</b>
+{chr(10).join([f'• {name}' for name in signal_names])}
+
 🔢 <b>عدد الإشارات:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
@@ -295,7 +338,20 @@ def process_alerts(alerts):
                 signal_memory[symbol][direction] = []
                 print(f"📤 Sent alert for {symbol} ({direction})")
 
-# ... (بقية الكود كما هو بدون تغيير)
+# 🔹 اختبار الخدمات
+def test_services():
+    print("🧪 Testing services...")
+    
+    # اختبار التليجرام
+    test_msg = "🟢 Bot started successfully!\n⏰ Saudi Time: " + get_saudi_time()
+    telegram_ok = send_telegram_to_all(test_msg)
+    
+    if telegram_ok:
+        print("✅ Telegram service: OK")
+    else:
+        print("❌ Telegram service: Failed")
+    
+    print("🟢 Services test completed")
 
 # ✅ استقبال الويب هوك
 @app.route("/webhook", methods=["POST"])
@@ -366,7 +422,20 @@ def webhook():
         print(f"❌ Error in webhook: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 400
 
-# ... (بقية الكود كما هو)
+# 🔹 صفحة الرئيسية للتحقق من حالة الخادم
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "status": "running",
+        "service": "tradingview-webhook-processor",
+        "saudi_time": get_saudi_time(),
+        "required_signals": REQUIRED_SIGNALS,
+        "monitored_stocks": STOCK_LIST,
+        "memory_stats": {symbol: {
+            "bullish": len(signals["bullish"]),
+            "bearish": len(signals["bearish"])
+        } for symbol, signals in signal_memory.items()}
+    })
 
 # 🔹 تشغيل التطبيق
 if __name__ == "__main__":
