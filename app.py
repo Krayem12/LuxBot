@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import os
 from collections import defaultdict
 import json
+import re
 
 app = Flask(__name__)
 
@@ -20,6 +21,12 @@ CHAT_ID = "624881400"
 # 🔹 الحصول على التوقيت السعودي
 def get_saudi_time():
     return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
+
+# 🔹 إزالة تنسيق HTML من النص
+def remove_html_tags(text):
+    """إزالة علامات HTML من النص"""
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', text)
 
 # 🔹 إرسال رسالة لمستخدم واحد
 def send_telegram_to_all(message):
@@ -72,14 +79,16 @@ signal_memory = defaultdict(lambda: {
     "bearish": []
 })
 
-# 🔹 إرسال POST خارجي (معدل لإرسال نفس رسالة التليجرام بالضبط)
+# 🔹 إرسال POST خارجي (معدل لإرسال رسالة بدون تنسيق HTML)
 def send_post_request(message, indicators, signal_type=None):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     
-    # إرسال نفس رسالة التليجرام بالضبط إلى الخادم الخارجي
+    # إزالة تنسيق HTML من الرسالة
+    clean_message = remove_html_tags(message)
+    
+    # إرسال الرسالة بدون تنسيق HTML إلى الخادم الخارجي
     payload = {
-        "text": message,  # نفس النص المنسق بالضبط
-        "parse_mode": "HTML",  # نفس نمط التنسيق
+        "text": clean_message,  # الرسالة بدون تنسيق HTML
         "extras": {
             "indicators": indicators,
             "timestamp": datetime.utcnow().isoformat(),
@@ -242,10 +251,10 @@ def process_alerts(alerts):
 <code>انطلاق هبوطي متوقع</code>"""
                     signal_type = "BEARISH_CONFIRMATION"
                 
-                # إرسال إلى التليجرام
+                # إرسال إلى التليجرام (مع تنسيق HTML)
                 telegram_success = send_telegram_to_all(message)
                 
-                # إرسال إلى الخادم الخارجي (نفس الرسالة بالضبط)
+                # إرسال إلى الخادم الخارجي (بدون تنسيق HTML)
                 external_success = send_post_request(message, f"{direction.upper()} signals", signal_type)
                 
                 if telegram_success and external_success:
