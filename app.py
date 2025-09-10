@@ -122,12 +122,13 @@ def cleanup_signals():
         if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish']:
             del signal_memory[symbol]
 
-# ✅ استخراج اسم السهم من الرسالة
+# ✅ استخراج اسم السهم من الرسالة (معدل)
 def extract_symbol(message):
     message_upper = message.upper()
     
-    # البحث عن أي رمز سهم في القائمة
-    for symbol in STOCK_LIST:
+    # البحث عن أي رمز سهم في القائمة (بترتيب عكسي للأطول أولاً لتجنب المطابقات الجزئية)
+    sorted_stocks = sorted(STOCK_LIST, key=len, reverse=True)
+    for symbol in sorted_stocks:
         if symbol in message_upper:
             return symbol
     
@@ -342,7 +343,7 @@ def home():
         "status": "running",
         "message": "TradingView Webhook Receiver is active",
         "monitored_stocks": STOCK_LIST,
-        "active_signals": {k: v for k, v in signal_memory.items()},  # ✓ تم التصحيح
+        "active_signals": {k: v for k, v in signal_memory.items()},
         "timestamp": datetime.utcnow().isoformat()
     })
 
