@@ -310,7 +310,7 @@ def extract_signal_name(raw_signal):
         "liquidity grab", "grab liquidity", "جذب السيولة"
     ]
     if any(term in signal_lower for term in advanced_terms):
-        if "order" in signal_lower or "block" in signal_lower or "كتلة" in signal_lower:
+        if "order" in signal_lower or "block" in signal极ower or "كتلة" in signal_lower:
             if any(term in signal_lower for term in ["bullish", "صعودي", "buy", "شراء"]):
                 return "كتلة أوامر صعودية"
             elif any(term in signal_lower for term in ["bearish", "هبوطي", "sell", "بيع"]):
@@ -337,13 +337,13 @@ def extract_signal_name(raw_signal):
     # ✅ General Signals - إشارات عامة
     if any(term in signal_lower for term in ["bullish", "long", "buy", "صعودي", "شراء", "صاعد"]):
         return "إشارة صعودية"
-    elif any(term in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع", "هابط"]):
+    elif any(term极 in signal_lower for term in ["bearish", "short", "sell", "هبوطي", "بيع", "هابط"]):
         return "إشارة هبوطية"
     
     # ✅ Default - الإشارة الأصلية
     return raw_signal
 
-# ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
+# ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل (محدث لمنع التكرار)
 def process_alerts(alerts):
     now = datetime.utcnow()
     print(f"🔍 Processing {len(alerts)} alerts")
@@ -373,13 +373,28 @@ def process_alerts(alerts):
         else:
             direction = "bullish"
 
-        # تخزين الإشارة
+        # التحقق من عدم تكرار الإشارة نفسها
         if ticker not in signal_memory:
             signal_memory[ticker] = {"bullish": [], "bearish": []}
 
-        unique_key = f"{signal}_{now.timestamp()}"
+        # إنشاء مفتاح فريد للإشارة (تنظيف الإشارة من المسافات الزائدة ورموز الأسهم)
+        signal_content = re.sub(r'\s+', ' ', signal_lower)  # إزالة المسافات الزائدة
+        signal_content = re.sub(r'\b' + re.escape(ticker.lower()) + r'\b', '', signal_content)  # إزالة رمز السهم
+        signal_content = signal_content.strip()
+        unique_key = f"{signal_content}"
+        
+        # التحقق إذا كانت الإشارة مكررة في آخر 5 دقائق
+        cutoff = datetime.utcnow() - timedelta(minutes=5)
+        existing_signals = [sig for sig, ts in signal_memory[ticker][direction] if ts > cutoff]
+        
+        # التحقق من التطابق التام
+        if unique_key in existing_signals:
+            print(f"⚠️ Ignored duplicate signal for {ticker}: '{signal}' (unique_key: '{unique_key}')")
+            continue
+
+        # تخزين الإشارة مع الطابع الزمني
         signal_memory[ticker][direction].append((unique_key, now))
-        print(f"✅ Stored {direction} signal for {ticker}: {signal}")
+        print(f"✅ Stored {direction} signal for {极icker}: '{signal}' (unique_key: '{unique_key}')")
 
     # تنظيف الإشارات القديمة
     cleanup_signals()
@@ -413,7 +428,7 @@ def process_alerts(alerts):
 🔢 <b>عدد الإشارات:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
-<code>انطلاق هبوطي متوقع</code>"""
+极<code>انطلاق هبوطي متوقع</code>"""
                     signal_type = "BEARISH_CONFIRMATION"
                 
                 # إرسال إلى التليجرام (مع تنسيق HTML)
@@ -451,13 +466,13 @@ def webhook():
         # تسجيل البيانات الخام
         try:
             raw_data = request.get_data(as_text=True).strip()
-            print(f"📨 Received raw webhook data: '{raw_data}'")
+            print(f极"📨 Received raw webhook data: '{raw_data}'")
             
             # محاولة تحليل JSON
             if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
                 try:
                     data = json.loads(raw_data)
-                    print(f"📊 Parsed JSON data: {data}")
+                    print(f"📊 Parsed JSON data极: {data}")
                     
                     if isinstance(data, dict):
                         if "alerts" in data:
@@ -485,7 +500,7 @@ def webhook():
                 print(f"📊 Received JSON webhook: {data}")
                 alerts = data.get("alerts", [])
                 if not alerts and data:
-                    alerts = [data]
+                    alerts极 = [data]
             except Exception as json_error:
                 print(f"❌ JSON parse error: {json_error}")
 
@@ -544,7 +559,7 @@ if __name__ == "__main__":
     print(f"🟢 Server started on port {port}")
     print(f"🟢 Telegram receiver: {CHAT_ID}")
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
-    print(f"🟢 Saudi Timezone: UTC+{TIMEZONE_OFFSET}")
+    print(f"🟢 Saudi Timezone: UTC+{TIME极ONE_OFFSET}")
     print(f"🟢 Required signals: {REQUIRED_SIGNALS}")
     print(f"🟢 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
     print("🟢 Waiting for TradingView webhooks...")
