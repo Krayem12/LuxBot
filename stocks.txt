@@ -72,69 +72,69 @@ EOSUSDT
 TRXUSDT
 
 # الأسهم السعودية (تداول)
-National Commercial Bank (AlAhli)
-Al Rajhi Bank
-Albilad Bank
-Alinma Bank
-Riyadh Bank
-Arab National Bank
-Aljazira Bank
-Samba Financial Group
-Saudi Fransi Bank
-Gulf International Bank (GIB)
-SABIC
-Tasnee (National Industrialization)
-Advanced Petrochemical Company
-SABIC Agri-Nutrients
-SABIC Fertilizers (Agri-Nutrients)
-SABIC Petrochemicals
-Yanbu Petrochemical Company
-Kayan Petrochemical Company
-Ma’ather Petrochemical
-Aramco
-STC (Saudi Telecom Company)
-Zain KSA
-Etihad Etisalat
-Arab Telecom
-Qassim Cement
-Madinah Cement
-Eastern Province Cement
-Yanbu Cement
-Saudi Cement Company
-Yamama Cement
-New Qassim Cement
-Tawuniya (The Cooperative)
-Tawuniya
-SAICO
-AlAhli Takaful
-Salama Cooperative
-Al Rajhi Takaful
-Othaim Markets
-Saudi Retail
-Extra Stores
-Albilad Retail
-Riyadh Retail
-SASCO
-Alhokair Group
-Saudi Investment
-Carrefour Saudi Arabia
-Saudi Electricity Company
-Siren
-Makkah Construction
-Sipchem
-Umm Al-Qura Cement
-Madinah Cement
-Eastern Province Cement
-Basic Industries
-Petrochem
-Leejam
-Maharah
-Jarir Bookstore
-Al-Dawaa Pharmacies
-Nahdi Pharmacies
-Savola Group
-Sadara Chemical Company
-Tanmiah Food Company
-TASI (Tadawul All Share Index)
-TASI-BK (Banks Index)
-TASI-PC (Petrochemicals Index)
+1180
+1010
+1120
+1050
+1030
+1080
+1140
+1040
+1020
+1150
+2020
+2060
+2330
+1211
+2010
+2002
+2290
+2350
+2200
+2222
+7010
+7030
+7200
+7201
+3002
+3003
+3004
+3005
+3007
+3010
+3040
+8250
+8230
+8100
+8150
+8200
+8270
+4001
+4002
+4003
+4004
+4005
+4006
+4007
+4008
+4009
+5110
+1810
+4100
+1320
+1301
+1302
+1303
+1210
+2380
+1830
+1831
+1820
+4200
+4210
+2050
+2270
+2280
+TASI
+TASI
+TASI
