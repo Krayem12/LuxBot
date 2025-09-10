@@ -72,86 +72,69 @@ EOSUSDT
 TRXUSDT
 
 # الأسهم السعودية (تداول)
-# البنوك
-1180.SR  # البنك الأهلي
-1010.SR  # الراجحي
-1120.SR  # البلاد
-1050.SR  # الإنماء
-1030.SR  # الرياض
-1080.SR  # العربي الوطني
-1140.SR  # الجزيرة
-1040.SR  # سامبا
-1020.SR  # السعودي الفرنسي
-1150.SR  # الخليجية
-
-# البتروكيماويات
-2020.SR  # سابك
-2060.SR  # التصنيع
-2330.SR  # Advanced
-1211.SR  # SABIC Agri-Nutrients
-2010.SR  # سابك للمغذيات الزراعية
-2002.SR  # سابك للبتروكيماويات
-2290.SR  # ينبع
-2350.SR  # كيان
-2200.SR  # المعذر
-2222.SR  # أرامكو
-
-# الاتصالات
-7010.SR  # STC
-7030.SR  # زين
-7200.SR  # اتحاد اتصالات
-7201.SR  # العربية للاتصالات
-
-# الأسمنت
-3002.SR  # أسمنت القصيم
-3003.SR  # أسمنت المدينة
-3004.SR  # أسمنت الشرقية
-3005.SR  # أسمنت ينبع
-3007.SR  # أسمنت السعودية
-3010.SR  # أسمنت اليمامة
-3040.SR  # أسمنت القصيم (الجديد)
-
-# التأمين
-8250.SR  # التعاونية
-8230.SR  # Tawuniya
-8100.SR  # سايكو
-8150.SR  # الأهلي للتكافل
-8200.SR  # سلامة
-8270.SR  # الراجحي للتكافل
-
-# التجزئة
-4001.SR  # أسواق العثيم
-4002.SR  # السعودية
-4003.SR  # إكسترا
-4004.SR  # البلاد
-4005.SR  # الرياض
-4006.SR  # ساسكو
-4007.SR  # الحكير
-4008.SR  # السعودية للاستثمار
-4009.SR  # كارفور
-
-# الطاقة والمرافق
-5110.SR  # السعودية للكهرباء
-1810.SR  # سيرين
-4100.SR  # مكة للإنشاء
-1320.SR  # سبكيم
-1301.SR  # اسمنت ام القرى
-1302.SR  # اسمنت المدينة
-1303.SR  # اسمنت الشرقية
-
-# الأسهم القيادية الأخرى
-1210.SR  # Basic Industries
-2380.SR  # petrochem
-1830.SR  # Leejam
-1831.SR  # Maharah
-1820.SR  # Jarir
-4200.SR  # Al-Dawaa
-4210.SR  # Nahdi
-2050.SR  # Savola
-2270.SR  # Sadara
-2280.SR  # Tanmiah
-
-# مؤشرات سوق الأسهم السعودي
-.TASI   # مؤشر تداول العام
-.TASI.BK  # مؤشر البنوك
-.TASI.PC  # مؤشر البتروكيماويات
+National Commercial Bank (AlAhli)
+Al Rajhi Bank
+Albilad Bank
+Alinma Bank
+Riyadh Bank
+Arab National Bank
+Aljazira Bank
+Samba Financial Group
+Saudi Fransi Bank
+Gulf International Bank (GIB)
+SABIC
+Tasnee (National Industrialization)
+Advanced Petrochemical Company
+SABIC Agri-Nutrients
+SABIC Fertilizers (Agri-Nutrients)
+SABIC Petrochemicals
+Yanbu Petrochemical Company
+Kayan Petrochemical Company
+Ma’ather Petrochemical
+Aramco
+STC (Saudi Telecom Company)
+Zain KSA
+Etihad Etisalat
+Arab Telecom
+Qassim Cement
+Madinah Cement
+Eastern Province Cement
+Yanbu Cement
+Saudi Cement Company
+Yamama Cement
+New Qassim Cement
+Tawuniya (The Cooperative)
+Tawuniya
+SAICO
+AlAhli Takaful
+Salama Cooperative
+Al Rajhi Takaful
+Othaim Markets
+Saudi Retail
+Extra Stores
+Albilad Retail
+Riyadh Retail
+SASCO
+Alhokair Group
+Saudi Investment
+Carrefour Saudi Arabia
+Saudi Electricity Company
+Siren
+Makkah Construction
+Sipchem
+Umm Al-Qura Cement
+Madinah Cement
+Eastern Province Cement
+Basic Industries
+Petrochem
+Leejam
+Maharah
+Jarir Bookstore
+Al-Dawaa Pharmacies
+Nahdi Pharmacies
+Savola Group
+Sadara Chemical Company
+Tanmiah Food Company
+TASI (Tadawul All Share Index)
+TASI-BK (Banks Index)
+TASI-PC (Petrochemicals Index)
