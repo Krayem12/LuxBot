@@ -12,7 +12,7 @@ app = Flask(__name__)
 TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 
 # 🔹 عدد الإشارات المطلوبة (تم التغيير من 1 إلى 2)
-REQUIRED_SIGNALS = 2
+REQUIRED_SIGNALS = 3
 
 # 🔹 بيانات التليجرام الصحيحة
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
