@@ -72,19 +72,19 @@ signal_memory = defaultdict(lambda: {
     "bearish": []
 })
 
-# 🔹 إرسال POST خارجي (معدل ليكون بنفس تنسيق رسالة التليجرام)
+# 🔹 إرسال POST خارجي (معدل لإرسال نفس رسالة التليجرام بالضبط)
 def send_post_request(message, indicators, signal_type=None):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     
-    # استخدام نفس تنسيق رسالة التليجرام للخادم الخارجي
+    # إرسال نفس رسالة التليجرام بالضبط إلى الخادم الخارجي
     payload = {
-        "text": message,
-        "parse_mode": "HTML",
+        "text": message,  # نفس النص المنسق بالضبط
+        "parse_mode": "HTML",  # نفس نمط التنسيق
         "extras": {
             "indicators": indicators,
             "timestamp": datetime.utcnow().isoformat(),
             "source": "tradingview-bot",
-            "original_signal_type": signal_type  # حفظ النوع الأصلي للتصحيح
+            "original_signal_type": signal_type
         }
     }
     
@@ -245,7 +245,7 @@ def process_alerts(alerts):
                 # إرسال إلى التليجرام
                 telegram_success = send_telegram_to_all(message)
                 
-                # إرسال إلى الخادم الخارجي
+                # إرسال إلى الخادم الخارجي (نفس الرسالة بالضبط)
                 external_success = send_post_request(message, f"{direction.upper()} signals", signal_type)
                 
                 if telegram_success and external_success:
