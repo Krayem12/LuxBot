@@ -11,19 +11,19 @@ import logging
 app = Flask(__name__)
 
 # 🔹 إعداد التوقيت السعودي (UTC+3)
-TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
+TIMEZONE_OFFSET = 3
 
-# 🔹 عدد الإشارات المطلوبة (تم التغيير إلى 1 للتجربة)
+# 🔹 عدد الإشارات المطلوبة
 REQUIRED_SIGNALS = 2
 
-# 🔹 بيانات التليجرام الصحيحة
+# 🔹 بيانات التليجرام
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# 🔹 وقت التكرار المسموح به (300 ثانية = 5 دقائق)
-DUPLICATE_TIMEFRAME = 300  # ثواني
+# 🔹 وقت التكرار المسموح به (5 دقائق)
+DUPLICATE_TIMEFRAME = 300
 
-# 🔹 قائمة المؤشرات والفلاتر المعروفة (بما في ذلك فيبوناتشي LuxAlgo)
+# 🔹 المؤشرات والفلاتر
 KNOWN_INDICATORS = [
     "Internal High", "Internal Low", "Swing High", "Swing Low",
     "Premium", "Equilibrium Average", "Discount", "Bullish I-CHoCH",
@@ -37,33 +37,33 @@ KNOWN_INDICATORS = [
     "Anchor To Origin", "LuxAlgo", "Fibonacci", "Retracement"
 ]
 
-# 🔹 مستويات فيبوناتشي LuxAlgo
+# 🔹 مستويات فيبوناتشي
 FIBONACCI_LEVELS = {
     "0.786": "مستوى فيبوناتشي 0.786",
-    "0.618": "مستوى فيبوناتشي 0.618", 
+    "0.618": "مستوى فيبوناتشي 0.618",
     "0.5": "مستوى فيبوناتشي 0.5",
     "0.382": "مستوى فيبوناتشي 0.382",
     "0.236": "مستوى فيبوناتشي 0.236"
 }
 
-# 🔹 Logger بدل print
+# 🔹 Logger
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
-# 🔹 الحصول على التوقيت السعودي
+# 🔹 التوقيت السعودي
 def get_saudi_time():
     return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
 
-# 🔹 إزالة تنسيق HTML من النص
+# 🔹 إزالة HTML
 def remove_html_tags(text):
     clean = re.compile('<.*?>')
     return re.sub(clean, '', text)
 
-# 🔹 إنشاء بصمة فريدة للإشارة لمنع التكرار
+# 🔹 بصمة فريدة
 def create_signal_fingerprint(symbol, direction, signal_type):
     content = f"{symbol}_{direction}_{signal_type.lower().strip()}"
     return hashlib.md5(content.encode()).hexdigest()
 
-# 🔹 إرسال رسالة لمستخدم واحد
+# 🔹 إرسال تليجرام
 def send_telegram_to_all(message):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -74,7 +74,7 @@ def send_telegram_to_all(message):
         logging.error(f"Telegram send error: {e}")
         return False
 
-# 🔹 تحميل قائمة الأسهم من ملف
+# 🔹 تحميل قائمة الأسهم
 def load_stocks():
     try:
         with open('stocks.txt', 'r') as f:
@@ -85,10 +85,7 @@ def load_stocks():
         logging.warning("stocks.txt not found, using default list")
     return ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30"]
 
-# قائمة الأسهم
 STOCK_LIST = load_stocks()
-
-# 🔹 ذاكرة مؤقتة لتخزين الإشارات لكل سهم
 signal_memory = defaultdict(lambda: {"bullish": [], "bearish": [], "last_signals": {}})
 
 # 🔹 إرسال POST خارجي
@@ -103,7 +100,7 @@ def send_post_request(message, indicators, signal_type=None):
         logging.error(f"External send error: {e}")
         return False
 
-# 🔹 تنظيف الإشارات القديمة (حسب DUPLICATE_TIMEFRAME)
+# 🔹 تنظيف الإشارات القديمة
 def cleanup_signals():
     cutoff = datetime.utcnow() - timedelta(seconds=DUPLICATE_TIMEFRAME)
     for symbol in list(signal_memory.keys()):
@@ -114,15 +111,14 @@ def cleanup_signals():
         if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish'] and not signal_memory[symbol]['last_signals']:
             del signal_memory[symbol]
 
-# ✅ التحقق من التكرار
+# 🔹 التحقق من التكرار
 def is_duplicate_signal(symbol, signal_fingerprint):
     last_seen = signal_memory[symbol]["last_signals"].get(signal_fingerprint)
-    if last_seen:
-        if (datetime.utcnow() - last_seen).total_seconds() < DUPLICATE_TIMEFRAME:
-            return True
+    if last_seen and (datetime.utcnow() - last_seen).total_seconds() < DUPLICATE_TIMEFRAME:
+        return True
     return False
 
-# ✅ استخراج اسم السهم من الرسالة باستخدام regex
+# 🔹 استخراج رمز السهم
 def extract_symbol(message):
     cleaned_message = re.sub(r'[^A-Z0-9]+', ' ', message.upper())
     for symbol in sorted(STOCK_LIST, key=len, reverse=True):
@@ -140,7 +136,7 @@ def extract_symbol(message):
         return "US30"
     return "UNKNOWN"
 
-# ✅ استخراج اسم الإشارة من الرسالة
+# 🔹 استخراج اسم الإشارة بدقة
 def extract_signal_name(raw_signal):
     signal_lower = raw_signal.lower()
     for fib_level, fib_name in FIBONACCI_LEVELS.items():
@@ -155,7 +151,7 @@ def extract_signal_name(raw_signal):
         return "كسر هيكل هبوطي"
     return "إشارة تداول"
 
-# ✅ استخراج نوع الإشارة الأساسي
+# 🔹 استخراج نوع الإشارة الأساسي
 def extract_signal_type(signal_text):
     signal_lower = signal_text.lower()
     for fib_level in FIBONACCI_LEVELS.keys():
@@ -173,71 +169,37 @@ def extract_signal_type(signal_text):
         return "bearish"
     return "unknown"
 
-# ✅ تنظيف اسم الإشارة من الطوابع الزمنية
+# 🔹 تنظيف اسم الإشارة
 def clean_signal_name(signal_text):
     cleaned = re.sub(r'_.*$', '', signal_text)
     cleaned = re.sub(r'\s+\d+$', '', cleaned)
     return cleaned.strip()
 
-# ✅ معالجة التنبيهات مع شرط اجتماع إشارة واحدة على الأقل
+# 🔹 معالجة التنبيهات
 def process_alerts(alerts):
     now = datetime.utcnow()
     for alert in alerts:
-        signal = alert.get("signal", "").strip()
+        raw_signal = alert.get("signal", "").strip()
         ticker = alert.get("ticker", "")
-        direction = "bearish" if any(w in signal.lower() for w in ["bearish", "down", "put", "short"]) else "bullish"
+        direction = "bearish" if any(w in raw_signal.lower() for w in ["bearish", "down", "put", "short"]) else "bullish"
         if not ticker or ticker == "UNKNOWN":
-            ticker = extract_symbol(signal)
+            ticker = extract_symbol(raw_signal)
         if ticker == "UNKNOWN":
             continue
-        signal_type = extract_signal_type(signal)
+
+        # ✅ استخراج اسم الإشارة بدقة
+        signal_name = extract_signal_name(raw_signal)
+        signal_type = extract_signal_type(raw_signal)
         signal_fingerprint = create_signal_fingerprint(ticker, direction, signal_type)
+
         if is_duplicate_signal(ticker, signal_fingerprint):
             continue
+
         signal_memory[ticker]["last_signals"][signal_fingerprint] = now
-        unique_key = f"{signal}_{now.timestamp()}"
+        unique_key = f"{signal_name}_{now.timestamp()}"
         signal_memory[ticker][direction].append((unique_key, now, signal_fingerprint))
+
     cleanup_signals()
+
     for symbol, signals in signal_memory.items():
-        for direction in ["bullish", "bearish"]:
-            if len(signals[direction]) >= REQUIRED_SIGNALS:
-                saudi_time = get_saudi_time()
-                signals_list = "\n".join([f"{i+1}. {clean_signal_name(sig[0])}" for i, sig in enumerate(signals[direction])])
-                if direction == "bullish":
-                    message = f"""🚀 <b>{symbol} - تأكيد إشارة صعودية</b>\n\n📊 <b>الإشارات المستلمة:</b>\n{signals_list}\n\n🔢 <b>عدد الإشارات:</b> {len(signals[direction])}\n⏰ <b>التوقيت السعودي:</b> {saudi_time}"""
-                    signal_type = "BULLISH_CONFIRMATION"
-                else:
-                    message = f"""📉 <b>{symbol} - تأكيد إشارة هبوطية</b>\n\n📊 <b>الإشارات المستلمة:</b>\n{signals_list}\n\n🔢 <b>عدد الإشارات:</b> {len(signals[direction])}\n⏰ <b>التوقيت السعودي:</b> {saudi_time}"""
-                    signal_type = "BEARISH_CONFIRMATION"
-                send_telegram_to_all(message)
-                send_post_request(message, f"{direction.upper()} signals", signal_type)
-                signal_memory[symbol][direction] = []
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        alerts = []
-        raw_data = request.get_data(as_text=True).strip()
-        try:
-            data = json.loads(raw_data)
-            if isinstance(data, dict):
-                alerts = data.get("alerts", [data])
-            elif isinstance(data, list):
-                alerts = data
-        except Exception:
-            alerts = [{"signal": raw_data}]
-        if alerts:
-            process_alerts(alerts)
-            return jsonify({"status": "alert_processed", "count": len(alerts)}), 200
-        return jsonify({"status": "no_alerts"}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 400
-
-@app.route("/")
-def home():
-    return jsonify({"status": "running", "monitored_stocks": STOCK_LIST, "duplicate_timeframe": f"{DUPLICATE_TIMEFRAME} seconds", "required_signals": REQUIRED_SIGNALS})
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    logging.info(f"Server started on port {port}")
-    app.run(host="0.0.0.0", port=port)
+        for
