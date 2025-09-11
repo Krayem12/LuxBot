@@ -51,7 +51,7 @@ def create_signal_fingerprint(signal_text, symbol, signal_type):
     content = f"{symbol}_{signal_type}_{signal_text.lower().strip()}"
     return hashlib.md5(content.encode()).hexdigest()
 
-# 🔹 إرسال رسالة لمستخدم واحد
+# 🔹 إرسal رسالة لمستخدم واحد
 def send_telegram_to_all(message):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -103,7 +103,7 @@ signal_memory = defaultdict(lambda: {
     "last_signals": {}  # لتتبع آخر الإشارات ومنع التكرار
 })
 
-# 🔹 إرسال POST خارجي (معدل لإرسال رسالة بدون تنسيق HTML)
+# 🔹 إرسal POST خارجي (معدل لإرسال رسالة بدون تنسيق HTML)
 def send_post_request(message, indicators, signal_type=None):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     
@@ -300,7 +300,7 @@ def extract_signal_type(signal_text):
 # ✅ تنظيف اسم الإشارة من الطوابع الزمنية
 def clean_signal_name(signal_text):
     """إزالة الطوابع الزمنية والأرقام من اسم الإشارة"""
-    # إزالة أي شيء بعد الشرطة السفلية (مثل _1757590802.362669)
+    # إزالة أي شيء بعد الشرطة السفلية (م مثل _1757590802.362669)
     cleaned = re.sub(r'_.*$', '', signal_text)
     # إزالة أي أرقام في نهاية السطر
     cleaned = re.sub(r'\s+\d+$', '', cleaned)
@@ -330,7 +330,7 @@ def process_alerts(alerts):
             ticker = extract_symbol(signal)
 
         if ticker == "UNKNOWN":
-            print(f"⚠️ Could not extract symbol from: {signal")
+            print(f"⚠️ Could not extract symbol from: {signal}")
             continue
 
         # تحديد الاتجاه تلقائياً من الإشارة
