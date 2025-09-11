@@ -12,8 +12,8 @@ app = Flask(__name__)
 # 🔹 إعداد التوقيت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 
-# 🔹 عدد الإشارات المطلوبة (تم التغيير إلى 1 للتجربة)
-REQUIRED_SIGNALS = 1
+# 🔹 عدد الإشارات المطلوبة (تم التغيير إلى 2)
+REQUIRED_SIGNALS = 2
 
 # 🔹 بيانات التليجرام الصحيحة
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
@@ -121,11 +121,13 @@ def send_post_request(message, indicators, signal_type=None):
             
     except requests.exceptions.Timeout:
         print("⏰ timeout الإرسال الخارجي: تجاوز الوقت المحدد")
+        return False
     except requests.exceptions.ConnectionError:
         print("🔌 فشل الاتصال بالخادم الخارجي")
+        return False
     except Exception as e:
         print(f"❌ خطأ في الإرسال الخارجي: {e}")
-    return False
+        return False
 
 # 🔹 تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
 def cleanup_signals():
@@ -192,27 +194,27 @@ def extract_signal_name(raw_signal):
     signal_lower = raw_signal.lower()
     
     if "bullish" in signal_lower and "bos" in signal_lower:
-        return "BOS Breakout"
+        return "كسر هيكل صعودي"
     elif "bearish" in signal_lower and "bos" in signal_lower:
-        return "BOS Breakdown"
+        return "كسر هيكل هبوطي"
     elif "bullish" in signal_lower and "choch" in signal_lower:
-        return "CHOCH Change"
+        return "تغير Character صعودي"
     elif "bearish" in signal_lower and "choch" in signal_lower:
-        return "CHOCH Change"
+        return "تغير Character هبوطي"
     elif "bullish" in signal_lower and "confluence" in signal_lower:
-        return "Strong Confluence"
+        return "تقارب صعودي قوي"
     elif "bearish" in signal_lower and "confluence" in signal_lower:
-        return "Strong Confluence"
+        return "تقارب هبوطي قوي"
     elif "bullish" in signal_lower:
-        return "Bullish Signal"
+        return "إشارة صعودية"
     elif "bearish" in signal_lower:
-        return "Bearish Signal"
+        return "إشارة هبوطية"
     elif "overbought" in signal_lower and "downward" in signal_lower:
-        return "Overbought Reversal"
+        return "انعكاس من منطقة ذروة شراء"
     elif "oversold" in signal_lower and "upward" in signal_lower:
-        return "Oversold Reversal"
+        return "انعكاس من منطقة ذروة بيع"
     else:
-        return raw_signal  # إرجاع النص الأصلي إذا لم يتم التعرف
+        return "إشارة تداول"
 
 # ✅ استخراج نوع الإشارة الأساسي
 def extract_signal_type(signal_text):
@@ -236,7 +238,7 @@ def extract_signal_type(signal_text):
     else:
         return "unknown"
 
-# ✅ معالجة التنبيهات مع شرط اجتماع إشارة واحدة على الأقل
+# ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
     now = datetime.utcnow()
     print(f"🔍 Processing {len(alerts)} alerts")
@@ -293,36 +295,39 @@ def process_alerts(alerts):
     # تنظيف الإشارات القديمة
     cleanup_signals()
 
-    # التحقق من إشارات كل سهم - إشارة واحدة على الأقل
+    # التحقق من إشارات كل سهم - إشارتان على الأقل
     for symbol, signals in signal_memory.items():
         for direction in ["bullish", "bearish"]:
-            if len(signals[direction]) >= REQUIRED_SIGNALS:  # إشارة واحدة على الأقل
+            if len(signals[direction]) >= REQUIRED_SIGNALS:  # إشارتان على الأقل
                 signal_count = len(signals[direction])
-                
-                # استخراج اسم الإشارة من آخر إشارة مخزنة
-                last_signal = signals[direction][-1][0] if signals[direction] else "Signal"
-                signal_name = extract_signal_name(last_signal)
                 
                 # الحصول على التوقيت السعودي
                 saudi_time = get_saudi_time()
                 
+                # بناء قائمة الإشارات المستلمة
+                signals_list = "\n".join([f"{i+1}. {sig[0]}" for i, sig in enumerate(signals[direction])])
+                
                 if direction == "bullish":
-                    message = f"""🚀 <b>{symbol} - Bullish Signal</b>
+                    message = f"""🚀 <b>{symbol} - تأكيد إشارة صعودية</b>
 
-📊 <b>Signal Type:</b> {signal_name}
-🔢 <b>Signals Count:</b> {signal_count}
-⏰ <b>Saudi Time:</b> {saudi_time}
+📊 <b>الإشارات المستلمة:</b>
+{signals_list}
 
-<code>Expected upward movement</code>"""
+🔢 <b>عدد الإشارات:</b> {signal_count}
+⏰ <b>التوقيت السعودي:</b> {saudi_time}
+
+⚠️ <i>تنبيه: هذه ليست نصيحة مالية، قم بإدارة المخاطر الخاصة بك</i>"""
                     signal_type = "BULLISH_CONFIRMATION"
                 else:
-                    message = f"""📉 <b>{symbol} - Bearish Signal</b>
+                    message = f"""📉 <b>{symbol} - تأكيد إشارة هبوطية</b>
 
-📊 <b>Signal Type:</b> {signal_name}
-🔢 <b>Signals Count:</b> {signal_count}
-⏰ <b>Saudi Time:</b> {saudi_time}
+📊 <b>الإشارات المستلمة:</b>
+{signals_list}
 
-<code>Expected downward movement</code>"""
+🔢 <b>عدد الإشارات:</b> {signal_count}
+⏰ <b>التوقيت السعودي:</b> {saudi_time}
+
+⚠️ <i>تنبيه: هذه ليست نصيحة مالية، قم بإدارة المخاطر الخاصة بك</i>"""
                     signal_type = "BEARISH_CONFIRMATION"
                 
                 # إرسال إلى التليجرام (مع تنسيق HTML)
