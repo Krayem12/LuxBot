@@ -244,16 +244,32 @@ def process_alerts(alerts):
                 'original_text': signal_text
             }
             
-            # التحقق من التكرار (نفس النص في آخر 5 دقائق)
-            cutoff = now - timedelta(minutes=5)
+            # 🔥 التحسين: التحقق من التكرار بناءً على المحتوى الأساسي (أول 7 كلمات)
+            cutoff = now - timedelta(minutes=15)
             existing_signals = [
                 sig for sig in signal_memory[extracted_ticker][direction] 
                 if sig['timestamp'] > cutoff
             ]
             
-            existing_texts = [sig['text'].lower() for sig in existing_signals]
-            if signal_text.lower() in existing_texts:
-                print(f"⚠️  Ignored duplicate signal for {extracted_ticker}")
+            # استخراج أول 7 كلمات من الإشارة الجديدة
+            new_words = signal_text.lower().split()[:7]
+            signal_keywords = ' '.join(sorted(set(new_words)))  # كلمات فريدة مرتبة
+            
+            is_duplicate = False
+            for sig in existing_signals:
+                # استخراج أول 7 كلمات من الإشارة الموجودة
+                existing_words = sig['text'].lower().split()[:7]
+                existing_keywords = ' '.join(sorted(set(existing_words)))
+                
+                # المقارنة بين الكلمات الأساسية
+                if signal_keywords == existing_keywords:
+                    print(f"⚠️  Ignored duplicate signal for {extracted_ticker}")
+                    print(f"   Existing: {existing_keywords}")
+                    print(f"   New: {signal_keywords}")
+                    is_duplicate = True
+                    break
+            
+            if is_duplicate:
                 continue
             
             # تخزين الإشارة
