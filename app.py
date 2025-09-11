@@ -21,7 +21,7 @@ TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
 # 🔹 وقت التكرار المسموح به (5 دقائق لمنع التكرار)
-DUPLICATE_TIMEFRAME = 600  # 300 ثانية = 5 دقائق
+DUPLICATE_TIMEFRAME = 300  # 300 ثانية = 5 دقائق
 
 # 🔹 قائمة المؤشرات والفلاتر المعروفة
 KNOWN_INDICATORS = [
@@ -51,7 +51,7 @@ def create_signal_fingerprint(signal_text, symbol, signal_type):
     content = f"{symbol}_{signal_type}_{signal_text.lower().strip()}"
     return hashlib.md5(content.encode()).hexdigest()
 
-# 🔹 إرسal رسالة لمستخدم واحد
+# 🔹 إرسال رسالة لمستخدم واحد
 def send_telegram_to_all(message):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -103,7 +103,7 @@ signal_memory = defaultdict(lambda: {
     "last_signals": {}  # لتتبع آخر الإشارات ومنع التكرار
 })
 
-# 🔹 إرسal POST خارجي (معدل لإرسال رسالة بدون تنسيق HTML)
+# 🔹 إرسال POST خارجي (معدل لإرسال رسالة بدون تنسيق HTML)
 def send_post_request(message, indicators, signal_type=None):
     url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
     
@@ -165,31 +165,7 @@ def cleanup_signals():
             not signal_memory[symbol]['last_signals']):
             del signal_memory[symbol]
 
-# ✅ دالة مقارنة الكلمات والتسلسل
-def is_similar_sentence(sentence1, sentence2, similarity_threshold=0.7):
-    """مقارنة جملتين بناءً على الكلمات والتسلسل"""
-    # تحويل الجمل إلى كلمات
-    words1 = sentence1.lower().split()
-    words2 = sentence2.lower().split()
-    
-    # إذا كان عدد الكلمات مختلفاً بشكل كبير، ليست متشابهة
-    if abs(len(words1) - len(words2)) > 2:
-        return False
-    
-    # مقارنة تسلسل الكلمات
-    common_words = 0
-    min_length = min(len(words1), len(words2))
-    
-    for i in range(min_length):
-        if words1[i] == words2[i]:
-            common_words += 1
-    
-    # حساب نسبة التشابه بناءً على تسلسل الكلمات
-    similarity = common_words / max(len(words1), len(words2))
-    
-    return similarity >= similarity_threshold
-
-# ✅ التحقق من التكرار (معدل بمقارنة الكلمات والتسلسل)
+# ✅ التحقق من التكرار (معدل بشكل أقوى)
 def is_duplicate_signal(symbol, signal_text, signal_fingerprint):
     """التحقق مما إذا كانت الإشارة مكررة خلال الفترة الزمنية المحددة"""
     if symbol in signal_memory:
@@ -203,16 +179,34 @@ def is_duplicate_signal(symbol, signal_text, signal_fingerprint):
         
         # التحقق من المحتوى المشابه بناءً على الكلمات والتسلسل
         current_signal = signal_text.strip()
+        
+        # تنظيف الإشارة الحالية من الرموز والأحرف الخاصة
+        current_clean = re.sub(r'[^\w\s]', '', current_signal.lower()).strip()
+        
         for existing_signal, ts, fp in signal_memory[symbol]["bullish"] + signal_memory[symbol]["bearish"]:
-            existing_signal_clean = existing_signal.split('_')[0].strip()  # إزالة الطوابع الزمنية
+            # تنظيف الإشارة المخزنة من الرموز والأحرف الخاصة
+            existing_clean = re.sub(r'[^\w\s]', '', existing_signal.split('_')[0].lower()).strip()
             
-            # مقارنة الكلمات والتسلسل
-            if is_similar_sentence(current_signal, existing_signal_clean, 0.7):  # 70% تشابه
+            # إذا كانت الإشارتان متطابقتان تماماً بعد التنظيف
+            if current_clean == existing_clean:
                 time_diff = (datetime.utcnow() - ts).total_seconds()
                 if time_diff < DUPLICATE_TIMEFRAME:
-                    print(f"⚠️ إشارة متشابهة لـ {symbol} تم تجاهلها (نفس الكلمات والتسلسل، الفارق: {time_diff:.1f} ثانية)")
+                    print(f"⚠️ إشارة مكررة لـ {symbol} تم تجاهلها (نفس المحتوى، الفارق: {time_diff:.1f} ثانية)")
                     print(f"   الإشارة الحالية: {current_signal}")
-                    print(f"   الإشارة السابقة: {existing_signal_clean}")
+                    print(f"   الإشارة السابقة: {existing_signal.split('_')[0]}")
+                    return True
+            
+            # مقارنة الكلمات الرئيسية (إذا احتوت على نفس الكلمات الأساسية)
+            current_words = set(current_clean.split())
+            existing_words = set(existing_clean.split())
+            
+            # إذا كان هناك تشابه كبير في الكلمات الرئيسية
+            common_words = current_words.intersection(existing_words)
+            if len(common_words) >= 3:  # إذا كان هناك 3 كلمات مشتركة على الأقل
+                time_diff = (datetime.utcnow() - ts).total_seconds()
+                if time_diff < DUPLICATE_TIMEFRAME:
+                    print(f"⚠️ إشارة متشابهة لـ {symbol} تم تجاهلها (كلمات مشتركة، الفارق: {time_diff:.1f} ثانية)")
+                    print(f"   الكلمات المشتركة: {common_words}")
                     return True
     
     return False
@@ -300,7 +294,7 @@ def extract_signal_type(signal_text):
 # ✅ تنظيف اسم الإشارة من الطوابع الزمنية
 def clean_signal_name(signal_text):
     """إزالة الطوابع الزمنية والأرقام من اسم الإشارة"""
-    # إزالة أي شيء بعد الشرطة السفلية (م مثل _1757590802.362669)
+    # إزالة أي شيء بعد الشرطة السفلية (مثل _1757590802.362669)
     cleaned = re.sub(r'_.*$', '', signal_text)
     # إزالة أي أرقام في نهاية السطر
     cleaned = re.sub(r'\s+\d+$', '', cleaned)
