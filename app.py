@@ -170,3 +170,4 @@ def process_alerts(alerts):
                 # مسح الإشارات بعد الإرسال
                 signal_memory[symbol][direction] = []
                 print(f"📤 Sent alert for {symbol} ({direction})")
+                application = app
