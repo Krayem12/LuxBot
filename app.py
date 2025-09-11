@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # 🔹 إعداد التوقيت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 3
+REQUIRED_SIGNALS = 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 MAX_MEMORY_SYMBOLS = 100  # حد أقصى للرموز في الذاكرة
