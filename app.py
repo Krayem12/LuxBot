@@ -12,8 +12,8 @@ app = Flask(__name__)
 # 🔹 إعداد التوقيت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 
-# 🔹 عدد الإشارات المطلوبة (تم التغيير من 3 إلى 2)
-REQUIRED_SIGNALS = 2
+# 🔹 عدد الإشارات المطلوبة (تم التغيير إلى 1 للتجربة)
+REQUIRED_SIGNALS = 1
 
 # 🔹 بيانات التليجرام الصحيحة
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
@@ -121,13 +121,11 @@ def send_post_request(message, indicators, signal_type=None):
             
     except requests.exceptions.Timeout:
         print("⏰ timeout الإرسال الخارجي: تجاوز الوقت المحدد")
-        return False
     except requests.exceptions.ConnectionError:
         print("🔌 فشل الاتصال بالخادم الخارجي")
-        return False
     except Exception as e:
         print(f"❌ خطأ في الإرسال الخارجي: {e}")
-        return False
+    return False
 
 # 🔹 تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
 def cleanup_signals():
@@ -166,24 +164,25 @@ def is_duplicate_signal(symbol, signal_fingerprint):
 
 # ✅ استخراج اسم السهم من الرسالة (معدل)
 def extract_symbol(message):
-    message_upper = message.upper()
+    # إزالة الأحرف غير الإنجليزية أولاً
+    cleaned_message = re.sub(r'[^\x00-\x7F]+', ' ', message).upper()
     
     # البحث عن أي رمز سهم في القائمة (بترتيب عكسي للأطول أولاً لتجنب المطابقات الجزئية)
     sorted_stocks = sorted(STOCK_LIST, key=len, reverse=True)
     for symbol in sorted_stocks:
-        if symbol in message_upper:
+        if symbol in cleaned_message:
             return symbol
     
     # إذا لم يتم العثور، البحث عن patterns معروفة
-    if "SPX" in message_upper or "500" in message_upper:
+    if "SPX" in cleaned_message or "500" in cleaned_message:
         return "SPX500"
-    elif "BTC" in message_upper:
+    elif "BTC" in cleaned_message:
         return "BTCUSDT" 
-    elif "ETH" in message_upper:
+    elif "ETH" in cleaned_message:
         return "ETHUSDT"
-    elif "NASDAQ" in message_upper or "100" in message_upper:
+    elif "NASDAQ" in cleaned_message or "100" in cleaned_message:
         return "NASDAQ100"
-    elif "DOW" in message_upper or "US30" in message_upper or "30" in message_upper:
+    elif "DOW" in cleaned_message or "US30" in cleaned_message or "30" in cleaned_message:
         return "US30"
     
     return "UNKNOWN"
@@ -193,21 +192,25 @@ def extract_signal_name(raw_signal):
     signal_lower = raw_signal.lower()
     
     if "bullish" in signal_lower and "bos" in signal_lower:
-        return "كسر هيكل صعودي"
+        return "BOS Breakout"
     elif "bearish" in signal_lower and "bos" in signal_lower:
-        return "كسر هيكل هبوطي"
+        return "BOS Breakdown"
     elif "bullish" in signal_lower and "choch" in signal_lower:
-        return "تغير Character صعودي"
+        return "CHOCH Change"
     elif "bearish" in signal_lower and "choch" in signal_lower:
-        return "تغير Character هبوطي"
+        return "CHOCH Change"
     elif "bullish" in signal_lower and "confluence" in signal_lower:
-        return "تقارب صعودي قوي"
+        return "Strong Confluence"
     elif "bearish" in signal_lower and "confluence" in signal_lower:
-        return "تقارب هبوطي قوي"
+        return "Strong Confluence"
     elif "bullish" in signal_lower:
-        return "إشارة صعودية"
+        return "Bullish Signal"
     elif "bearish" in signal_lower:
-        return "إشارة هبوطية"
+        return "Bearish Signal"
+    elif "overbought" in signal_lower and "downward" in signal_lower:
+        return "Overbought Reversal"
+    elif "oversold" in signal_lower and "upward" in signal_lower:
+        return "Oversold Reversal"
     else:
         return raw_signal  # إرجاع النص الأصلي إذا لم يتم التعرف
 
@@ -222,6 +225,10 @@ def extract_signal_type(signal_text):
         return "bos"
     elif "choch" in signal_lower:
         return "choch"
+    elif "overbought" in signal_lower:
+        return "overbought"
+    elif "oversold" in signal_lower:
+        return "oversold"
     elif "bullish" in signal_lower:
         return "bullish"
     elif "bearish" in signal_lower:
@@ -229,7 +236,7 @@ def extract_signal_type(signal_text):
     else:
         return "unknown"
 
-# ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
+# ✅ معالجة التنبيهات مع شرط اجتماع إشارة واحدة على الأقل
 def process_alerts(alerts):
     now = datetime.utcnow()
     print(f"🔍 Processing {len(alerts)} alerts")
@@ -244,6 +251,9 @@ def process_alerts(alerts):
             direction = "bullish"
             ticker = ""
 
+        # تنظيف الإشارة من الأحرف غير الإنجليزية
+        signal = re.sub(r'[^\x00-\x7F]+', ' ', signal).strip()
+        
         # استخراج السهم إذا لم يكن موجودًا
         if not ticker or ticker == "UNKNOWN":
             ticker = extract_symbol(signal)
@@ -254,7 +264,9 @@ def process_alerts(alerts):
 
         # تحديد الاتجاه تلقائياً من الإشارة
         signal_lower = signal.lower()
-        if "bearish" in signal_lower or "down" in signal_lower or "put" in signal_lower or "short" in signal_lower:
+        if ("bearish" in signal_lower or "down" in signal_lower or 
+            "put" in signal_lower or "short" in signal_lower or
+            "downward" in signal_lower or "overbought" in signal_lower):
             direction = "bearish"
         else:
             direction = "bullish"
@@ -281,36 +293,36 @@ def process_alerts(alerts):
     # تنظيف الإشارات القديمة
     cleanup_signals()
 
-    # التحقق من إشارات كل سهم - إشارتان على الأقل (تم التغيير من 3 إلى 2)
+    # التحقق من إشارات كل سهم - إشارة واحدة على الأقل
     for symbol, signals in signal_memory.items():
         for direction in ["bullish", "bearish"]:
-            if len(signals[direction]) >= REQUIRED_SIGNALS:  # إشارتان على الأقل
+            if len(signals[direction]) >= REQUIRED_SIGNALS:  # إشارة واحدة على الأقل
                 signal_count = len(signals[direction])
                 
                 # استخراج اسم الإشارة من آخر إشارة مخزنة
-                last_signal = signals[direction][-1][0] if signals[direction] else "إشارة"
+                last_signal = signals[direction][-1][0] if signals[direction] else "Signal"
                 signal_name = extract_signal_name(last_signal)
                 
                 # الحصول على التوقيت السعودي
                 saudi_time = get_saudi_time()
                 
                 if direction == "bullish":
-                    message = f"""🚀 <b>{symbol} - إشارة صعودية</b>
+                    message = f"""🚀 <b>{symbol} - Bullish Signal</b>
 
-📊 <b>نوع الإشارة:</b> {signal_name}
-🔢 <b>عدد الإشارات:</b> {signal_count}
-⏰ <b>التوقيت السعودي:</b> {saudi_time}
+📊 <b>Signal Type:</b> {signal_name}
+🔢 <b>Signals Count:</b> {signal_count}
+⏰ <b>Saudi Time:</b> {saudi_time}
 
-<code>انطلاق صعودي متوقع</code>"""
+<code>Expected upward movement</code>"""
                     signal_type = "BULLISH_CONFIRMATION"
                 else:
-                    message = f"""📉 <b>{symbol} - إشارة هبوطية</b>
+                    message = f"""📉 <b>{symbol} - Bearish Signal</b>
 
-📊 <b>نوع الإشارة:</b> {signal_name}
-🔢 <b>عدد الإشارات:</b> {signal_count}
-⏰ <b>التوقيت السعودي:</b> {saudi_time}
+📊 <b>Signal Type:</b> {signal_name}
+🔢 <b>Signals Count:</b> {signal_count}
+⏰ <b>Saudi Time:</b> {saudi_time}
 
-<code>انطلاق هبوطي متوقع</code>"""
+<code>Expected downward movement</code>"""
                     signal_type = "BEARISH_CONFIRMATION"
                 
                 # إرسال إلى التليجرام (مع تنسيق HTML)
@@ -349,6 +361,9 @@ def webhook():
         try:
             raw_data = request.get_data(as_text=True).strip()
             print(f"📨 Received raw webhook data: '{raw_data}'")
+            
+            # تنظيف البيانات من الأحرف غير الإنجليزية
+            raw_data = re.sub(r'[^\x00-\x7F]+', ' ', raw_data).strip()
             
             # محاولة تحليل JSON
             if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
