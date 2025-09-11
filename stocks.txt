@@ -38,7 +38,7 @@ XOM
 PFE
 CSCO
 INTC
-
+NXTT
 # العملات الأجنبية (الفوركس)
 EURUSD
 GBPUSD
@@ -140,3 +140,4 @@ TASI
 TASI
 Al Rajhi Bank
 alrajhi
+
