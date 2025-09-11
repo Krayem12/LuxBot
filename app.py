@@ -135,49 +135,6 @@ def cleanup_signals():
             if symbol in signal_memory:
                 del signal_memory[symbol]
 
-def extract_symbol(message: str, original_ticker: str = "") -> str:
-    message_upper = message.upper()
-    
-    if original_ticker and original_ticker != "UNKNOWN":
-        clean_ticker = re.sub(r'[^A-Z0-9]', '', original_ticker.upper())
-        if clean_ticker in STOCK_LIST:
-            return clean_ticker
-    
-    # البحث بالترتيب من الأطول إلى الأقصر
-    for symbol in sorted(STOCK_LIST, key=len, reverse=True):
-        symbol_pattern = r'\b' + re.escape(symbol) + r'\b'
-        if re.search(symbol_pattern, message_upper):
-            return symbol
-    
-    # الأنماط الخاصة (مرتبة من الأكثر تحديداً إلى الأقل)
-    patterns = [
-        (r'\bSPX\b.*\b500\b|\b500\b.*\bSPX\b', "SPX500"),
-        (r'\bNASDAQ\b.*\b100\b|\b100\b.*\bNASDAQ\b', "NASDAQ100"),
-        (r'\bXAUUSD\b|\bGOLD\b', "XAUUSD"),
-        (r'\bXAGUSD\b|\bSILVER\b', "XAGUSD"),
-        (r'\bBTCUSDT\b|\bBTC\b.*\bUSDT\b', "BTCUSDT"),
-        (r'\bBTC\b', "BTCUSDT"),
-        (r'\bETHUSDT\b|\bETH\b.*\bUSDT\b', "ETHUSDT"),
-        (r'\bETH\b', "ETHUSDT"),
-        (r'\bDOW\b|\bUS30\b|\b30\b', "US30"),
-        (r'\bOIL\b|\bCRUDE\b', "OIL"),
-        # 🔥 إضافة أنماط جديدة للتعرف على الإشارات العامة
-        (r'\bBULLISH\b.*\bCONFIRMATION\b', "GENERIC_BULL"),
-        (r'\bBEARISH\b.*\bCONFIRMATION\b', "GENERIC_BEAR"),
-        (r'\bCONFIRMATION\b.*\bBULLISH\b', "GENERIC_BULL"),
-        (r'\bCONFIRMATION\b.*\bBEARISH\b', "GENERIC_BEAR"),
-        (r'\bBULLISH\b.*\bSIGNAL\b', "GENERIC_BULL"),
-        (r'\bBEARISH\b.*\bSIGNAL\b', "GENERIC_BEAR"),
-        (r'\bSIGNAL\b.*\bBULLISH\b', "GENERIC_BULL"),
-        (r'\bSIGNAL\b.*\bBEARISH\b', "GENERIC_BEAR"),
-    ]
-    
-    for pattern, symbol in patterns:
-        if re.search(pattern, message_upper, re.IGNORECASE):
-            return symbol
-    
-    return "UNKNOWN"
-
 def determine_signal_direction(signal_text: str, original_direction: str = "") -> str:
     signal_lower = signal_text.lower()
     
@@ -202,7 +159,9 @@ def determine_signal_direction(signal_text: str, original_direction: str = "") -
         "liquidity pool", "liquidity grab", "market maker sell", "mm sell",
         "swing high", "internal high", "premium zone", "discount rejection",
         "previous day high", "previous week high", "previous month high",
-        "bearish i-choch", "bearish i-bos", "bos bearish"
+        "bearish i-choch", "bearish i-bos", "bos bearish",
+        "overbought", "hyper wave.*downward", "downward signal", "selling pressure",
+        "strong bearish", "bearish confluence", "distribution zone", "supply zone"
     ]
     
     bullish_indicators = [
@@ -216,11 +175,13 @@ def determine_signal_direction(signal_text: str, original_direction: str = "") -
         "liquidity sweep", "liquidity take", "market maker buy", "mm buy",
         "swing low", "internal low", "discount zone", "premium bounce",
         "previous day low", "previous week low", "previous month low",
-        "bullish i-choch", "bullish i-bos", "bos bullish"
+        "bullish i-choch", "bullish i-bos", "bos bullish",
+        "oversold", "hyper wave.*upward", "upward signal", "buying pressure",
+        "strong bullish", "bullish confluence", "accumulation zone", "demand zone"
     ]
     
-    bearish_count = sum(1 for term in bearish_indicators if term in signal_lower)
-    bullish_count = sum(1 for term in bullish_indicators if term in signal_lower)
+    bearish_count = sum(1 for term in bearish_indicators if re.search(term, signal_lower))
+    bullish_count = sum(1 for term in bullish_indicators if re.search(term, signal_lower))
     
     logger.info(f"📊 {signal_text[:30]}... - Bearish: {bearish_count}, Bullish: {bullish_count}")
     
@@ -260,6 +221,72 @@ def determine_signal_direction(signal_text: str, original_direction: str = "") -
     
     logger.warning("⚠️  Could not determine clear direction, ignoring signal")
     return "unknown"
+
+def extract_symbol(message: str, original_ticker: str = "") -> str:
+    message_upper = message.upper()
+    
+    if original_ticker and original_ticker != "UNKNOWN":
+        clean_ticker = re.sub(r'[^A-Z0-9]', '', original_ticker.upper())
+        if clean_ticker in STOCK_LIST:
+            return clean_ticker
+    
+    # البحث بالترتيب من الأطول إلى الأقصر
+    for symbol in sorted(STOCK_LIST, key=len, reverse=True):
+        symbol_pattern = r'\b' + re.escape(symbol) + r'\b'
+        if re.search(symbol_pattern, message_upper):
+            return symbol
+    
+    # الأنماط الخاصة (مرتبة من الأكثر تحديداً إلى الأقل)
+    patterns = [
+        (r'\bSPX\b.*\b500\b|\b500\b.*\bSPX\b', "SPX500"),
+        (r'\bNASDAQ\b.*\b100\b|\b100\b.*\bNASDAQ\b', "NASDAQ100"),
+        (r'\bXAUUSD\b|\bGOLD\b', "XAUUSD"),
+        (r'\bXAGUSD\b|\bSILVER\b', "XAGUSD"),
+        (r'\bBTCUSDT\b|\bBTC\b.*\bUSDT\b', "BTCUSDT"),
+        (r'\bBTC\b', "BTCUSDT"),
+        (r'\bETHUSDT\b|\bETH\b.*\bUSDT\b', "ETHUSDT"),
+        (r'\bETH\b', "ETHUSDT"),
+        (r'\bDOW\b|\bUS30\b|\b30\b', "US30"),
+        (r'\bOIL\b|\bCRUDE\b', "OIL"),
+        # 🔥 إضافة أنماط جديدة للتعرف على الإشارات العامة
+        (r'\bBULLISH\b.*\bCONFIRMATION\b', "GENERIC_BULL"),
+        (r'\bBEARISH\b.*\bCONFIRMATION\b', "GENERIC_BEAR"),
+        (r'\bCONFIRMATION\b.*\bBULLISH\b', "GENERIC_BULL"),
+        (r'\bCONFIRMATION\b.*\bBEARISH\b', "GENERIC_BEAR"),
+        (r'\bBULLISH\b.*\bSIGNAL\b', "GENERIC_BULL"),
+        (r'\bBEARISH\b.*\bSIGNAL\b', "GENERIC_BEAR"),
+        (r'\bSIGNAL\b.*\bBULLISH\b', "GENERIC_BULL"),
+        (r'\bSIGNAL\b.*\bBEARISH\b', "GENERIC_BEAR"),
+        # 🔥 إضافة أنماط جديدة للإشارات العامة الأخرى
+        (r'\bSTRONG\b.*\bBULLISH\b.*\bCONFLUENCE\b', "GENERIC_BULL"),
+        (r'\bBULLISH\b.*\bCONFLUENCE\b', "GENERIC_BULL"),
+        (r'\bBEARISH\b.*\bCONFLUENCE\b', "GENERIC_BEAR"),
+        (r'\bOVERBOUGHT\b.*\bBEARISH\b', "GENERIC_BEAR"),
+        (r'\bOVERSOLD\b.*\bBULLISH\b', "GENERIC_BULL"),
+        (r'\bHYPER\b.*\bWAVE\b.*\bBEARISH\b', "GENERIC_BEAR"),
+        (r'\bHYPER\b.*\bWAVE\b.*\bSELL\b', "GENERIC_BEAR"),
+        (r'\bHYPER\b.*\bWAVE\b.*\bBUY\b', "GENERIC_BULL"),
+        (r'\bSTRONG\b.*\bBULLISH\b', "GENERIC_BULL"),
+        (r'\bSTRONG\b.*\bBEARISH\b', "GENERIC_BEAR"),
+        (r'\bBUYING\b.*\bPRESSURE\b', "GENERIC_BULL"),
+        (r'\bSELLING\b.*\bPRESSURE\b', "GENERIC_BEAR"),
+    ]
+    
+    for pattern, symbol in patterns:
+        if re.search(pattern, message_upper, re.IGNORECASE):
+            return symbol
+    
+    # 🔥 إضافة رمز افتراضي إذا لم يتم التعرف على أي رمز
+    # تحديد الاتجاه أولاً لاختيار الرمز الافتراضي المناسب
+    direction = determine_signal_direction(message, "")
+    if direction == "bullish":
+        logger.warning(f"⚠️  Using default BULL symbol for: {message[:50]}...")
+        return "GENERIC_BULL"
+    elif direction == "bearish":
+        logger.warning(f"⚠️  Using default BEAR symbol for: {message[:50]}...")
+        return "GENERIC_BEAR"
+    
+    return "UNKNOWN"
 
 def normalize_text_for_comparison(text: str) -> str:
     """تطبيع النص للمقارنة مع إزالة العناصر غير المهمة"""
