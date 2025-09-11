@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # 🔹 إعداد التوقيت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 2
+REQUIRED_SIGNALS = 2  # ⬅️ تغيير من 3 إلى 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 MAX_MEMORY_SYMBOLS = 100  # حد أقصى للرموز في الذاكرة
@@ -161,6 +161,15 @@ def extract_symbol(message: str, original_ticker: str = "") -> str:
         (r'\bETH\b', "ETHUSDT"),
         (r'\bDOW\b|\bUS30\b|\b30\b', "US30"),
         (r'\bOIL\b|\bCRUDE\b', "OIL"),
+        # 🔥 إضافة أنماط جديدة للتعرف على الإشارات العامة
+        (r'\bBULLISH\b.*\bCONFIRMATION\b', "GENERIC_BULL"),
+        (r'\bBEARISH\b.*\bCONFIRMATION\b', "GENERIC_BEAR"),
+        (r'\bCONFIRMATION\b.*\bBULLISH\b', "GENERIC_BULL"),
+        (r'\bCONFIRMATION\b.*\bBEARISH\b', "GENERIC_BEAR"),
+        (r'\bBULLISH\b.*\bSIGNAL\b', "GENERIC_BULL"),
+        (r'\bBEARISH\b.*\bSIGNAL\b', "GENERIC_BEAR"),
+        (r'\bSIGNAL\b.*\bBULLISH\b', "GENERIC_BULL"),
+        (r'\bSIGNAL\b.*\bBEARISH\b', "GENERIC_BEAR"),
     ]
     
     for pattern, symbol in patterns:
@@ -340,7 +349,7 @@ def process_alerts(alerts: List[Any]):
     for symbol, signals in list(signal_memory.items()):
         for direction in ["bullish", "bearish"]:
             signal_list = signals.get(direction, [])
-            if len(signal_list) >= REQUIRED_SIGNALS:
+            if len(signal_list) >= REQUIRED_SIGNALS:  # ✅ الآن يتطلب إشارتين فقط
                 try:
                     signal_count = len(signal_list)
                     signal_details = []
@@ -463,7 +472,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     logger.info(f"🟢 Server started on port {port}")
     logger.info(f"🔒 Monitoring signals with high accuracy")
-    logger.info(f"📊 Required signals: {REQUIRED_SIGNALS}")
+    logger.info(f"📊 Required signals: {REQUIRED_SIGNALS}")  # ✅ سيظهر الآن 2
     logger.info(f"📦 Memory limit: {MAX_MEMORY_SYMBOLS} symbols")
     logger.info(f"🌐 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
     logger.info(f"🎯 Added Fibonacci & SMC levels for better target identification")
