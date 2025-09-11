@@ -170,4 +170,7 @@ def process_alerts(alerts):
                 # مسح الإشارات بعد الإرسال
                 signal_memory[symbol][direction] = []
                 print(f"📤 Sent alert for {symbol} ({direction})")
-                application = app
+            if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=port)
+else:
+    application = app
