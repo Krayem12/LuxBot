@@ -5,18 +5,22 @@ import os
 from collections import defaultdict
 import json
 import re
+import hashlib
 
 app = Flask(__name__)
 
 # 🔹 إعداد التوقيت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 
-# 🔹 عدد الإشارات المطلوبة (تم التغيير من 1 إلى 2)
+# 🔹 عدد الإشارات المطلوبة (تم التغيير من 3 إلى 2)
 REQUIRED_SIGNALS = 2
 
 # 🔹 بيانات التليجرام الصحيحة
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
+
+# 🔹 وقت التكرار المسموح به (دقيقتين لمنع التكرار)
+DUPLICATE_TIMEFRAME = 120  # ثانيتين
 
 # 🔹 الحصول على التوقيت السعودي
 def get_saudi_time():
@@ -27,6 +31,12 @@ def remove_html_tags(text):
     """إزالة علامات HTML من النص"""
     clean = re.compile('<.*?>')
     return re.sub(clean, '', text)
+
+# 🔹 إنشاء بصمة فريدة للإشارة لمنع التكرار
+def create_signal_fingerprint(signal_text, symbol, signal_type):
+    """إنشاء بصمة فريدة للإشارة بناءً على المحتوى والنوع"""
+    content = f"{symbol}_{signal_type}_{signal_text.lower().strip()}"
+    return hashlib.md5(content.encode()).hexdigest()
 
 # 🔹 إرسال رسالة لمستخدم واحد
 def send_telegram_to_all(message):
@@ -76,7 +86,8 @@ STOCK_LIST = load_stocks()
 # 🔹 ذاكرة مؤقتة لتخزين الإشارات لكل سهم
 signal_memory = defaultdict(lambda: {
     "bullish": [],
-    "bearish": []
+    "bearish": [],
+    "last_signals": {}  # لتتبع آخر الإشارات ومنع التكرار
 })
 
 # 🔹 إرسال POST خارجي (معدل لإرسال رسالة بدون تنسيق HTML)
@@ -124,12 +135,34 @@ def cleanup_signals():
     for symbol in list(signal_memory.keys()):
         for direction in ["bullish", "bearish"]:
             signal_memory[symbol][direction] = [
-                (sig, ts) for sig, ts in signal_memory[symbol][direction] 
+                (sig, ts, fp) for sig, ts, fp in signal_memory[symbol][direction] 
                 if ts > cutoff
             ]
+        
+        # تنظيف last_signals القديمة
+        current_time = datetime.utcnow()
+        signal_memory[symbol]["last_signals"] = {
+            fp: ts for fp, ts in signal_memory[symbol]["last_signals"].items()
+            if (current_time - ts).total_seconds() < DUPLICATE_TIMEFRAME
+        }
+        
         # تنظيف الذاكرة من الأسهم الفارغة
-        if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish']:
+        if (not signal_memory[symbol]['bullish'] and 
+            not signal_memory[symbol]['bearish'] and 
+            not signal_memory[symbol]['last_signals']):
             del signal_memory[symbol]
+
+# ✅ التحقق من التكرار
+def is_duplicate_signal(symbol, signal_fingerprint):
+    """التحقق مما إذا كانت الإشارة مكررة خلال الفترة الزمنية المحددة"""
+    if symbol in signal_memory:
+        last_seen = signal_memory[symbol]["last_signals"].get(signal_fingerprint)
+        if last_seen:
+            time_diff = (datetime.utcnow() - last_seen).total_seconds()
+            if time_diff < DUPLICATE_TIMEFRAME:
+                print(f"⚠️ إشارة مكررة لـ {symbol} تم تجاهلها (الفارق: {time_diff:.1f} ثانية)")
+                return True
+    return False
 
 # ✅ استخراج اسم السهم من الرسالة (معدل)
 def extract_symbol(message):
@@ -153,7 +186,7 @@ def extract_symbol(message):
     elif "DOW" in message_upper or "US30" in message_upper or "30" in message_upper:
         return "US30"
     
-    return "SPX500"  # افتراضي
+    return "UNKNOWN"
 
 # ✅ استخراج اسم الإشارة من الرسالة
 def extract_signal_name(raw_signal):
@@ -177,6 +210,24 @@ def extract_signal_name(raw_signal):
         return "إشارة هبوطية"
     else:
         return raw_signal  # إرجاع النص الأصلي إذا لم يتم التعرف
+
+# ✅ استخراج نوع الإشارة الأساسي
+def extract_signal_type(signal_text):
+    """استخراج النوع الأساسي للإشارة (للبصمة)"""
+    signal_lower = signal_text.lower()
+    
+    if "confluence" in signal_lower:
+        return "confluence"
+    elif "bos" in signal_lower:
+        return "bos"
+    elif "choch" in signal_lower:
+        return "choch"
+    elif "bullish" in signal_lower:
+        return "bullish"
+    elif "bearish" in signal_lower:
+        return "bearish"
+    else:
+        return "unknown"
 
 # ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
@@ -208,18 +259,29 @@ def process_alerts(alerts):
         else:
             direction = "bullish"
 
+        # إنشاء بصمة فريدة للإشارة
+        signal_type = extract_signal_type(signal)
+        signal_fingerprint = create_signal_fingerprint(signal_type, ticker, direction)
+        
+        # التحقق من التكرار
+        if is_duplicate_signal(ticker, signal_fingerprint):
+            continue  # تخطي الإشارة المكررة
+
         # تخزين الإشارة
         if ticker not in signal_memory:
-            signal_memory[ticker] = {"bullish": [], "bearish": []}
+            signal_memory[ticker] = {"bullish": [], "bearish": [], "last_signals": {}}
 
+        # تحديث وقت آخر رؤية لهذه البصمة
+        signal_memory[ticker]["last_signals"][signal_fingerprint] = now
+        
         unique_key = f"{signal}_{now.timestamp()}"
-        signal_memory[ticker][direction].append((unique_key, now))
+        signal_memory[ticker][direction].append((unique_key, now, signal_fingerprint))
         print(f"✅ Stored {direction} signal for {ticker}: {signal}")
 
     # تنظيف الإشارات القديمة
     cleanup_signals()
 
-    # التحقق من إشارات كل سهم - إشارتان على الأقل (تم التغيير من 1 إلى 2)
+    # التحقق من إشارات كل سهم - إشارتان على الأقل (تم التغيير من 3 إلى 2)
     for symbol, signals in signal_memory.items():
         for direction in ["bullish", "bearish"]:
             if len(signals[direction]) >= REQUIRED_SIGNALS:  # إشارتان على الأقل
@@ -352,7 +414,9 @@ def home():
         "status": "running",
         "message": "TradingView Webhook Receiver is active",
         "monitored_stocks": STOCK_LIST,
-        "active_signals": {k: v for k, v in signal_memory.items()},
+        "active_signals": {k: {ky: len(v) if ky in ["bullish", "bearish"] else v for ky, v in val.items()} for k, val in signal_memory.items()},
+        "duplicate_timeframe": f"{DUPLICATE_TIMEFRAME} seconds",
+        "required_signals": REQUIRED_SIGNALS,
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -381,6 +445,7 @@ if __name__ == "__main__":
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
     print(f"🟢 Saudi Timezone: UTC+{TIMEZONE_OFFSET}")
     print(f"🟢 Required signals: {REQUIRED_SIGNALS}")
+    print(f"🟢 Duplicate prevention: {DUPLICATE_TIMEFRAME} seconds")
     print(f"🟢 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
     print("🟢 Waiting for TradingView webhooks...")
     app.run(host="0.0.0.0", port=port)
