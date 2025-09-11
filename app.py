@@ -23,7 +23,7 @@ CHAT_ID = "624881400"
 # 🔹 وقت التكرار المسموح به (5 دقائق لمنع التكرار)
 DUPLICATE_TIMEFRAME = 300  # 300 ثانية = 5 دقائق
 
-# 🔹 قائمة المؤشرات والفلاتر المعروفة (بما في ذلك فيبوناتشي LuxAlgo)
+# 🔹 قائمة المؤشرات والفلاتر المعروفة
 KNOWN_INDICATORS = [
     "Internal High", "Internal Low", "Swing High", "Swing Low",
     "Premium", "Equilibrium Average", "Discount", "Bullish I-CHoCH",
@@ -32,19 +32,8 @@ KNOWN_INDICATORS = [
     "Previous Day High", "Previous Day Low", "Previous Week High",
     "Previous Week Low", "Previous Month High", "Previous Month Low",
     "Discount Zone", "HGH5 & LOWS MTF", "Daily", "Monday's", "Weekly",
-    "Monthly", "Fibonacci Retracements", "Fibonacci Top", "Fibonacci Bottom",
-    "0.786", "0.618", "0.5", "0.382", "0.236", "Show Top/Bottom Levels",
-    "Anchor To Origin", "LuxAlgo", "Fibonacci", "Retracement"
+    "Monthly"
 ]
-
-# 🔹 مستويات فيbوناتشي LuxAlgo
-FIBONACCI_LEVELS = {
-    "0.786": "مستوى فيبوناتشي 0.786",
-    "0.618": "مستوى فيبوناتشي 0.618", 
-    "0.5": "مستوى فيبوناتشي 0.5",
-    "0.382": "مستوى فيbوناتشي 0.382",
-    "0.236": "مستوى فيبوناتشي 0.236"
-}
 
 # 🔹 الحصول على التوقيت السعودي
 def get_saudi_time():
@@ -253,14 +242,9 @@ def extract_symbol(message):
     
     return "UNKNOWN"
 
-# ✅ استخراج اسم الإشارة من الرسالة (محدث مع فيبوناتشي)
+# ✅ استخراج اسم الإشارة من الرسالة
 def extract_signal_name(raw_signal):
     signal_lower = raw_signal.lower()
-    
-    # التحقق من مستويات فيبوناتشي أولاً
-    for fib_level, fib_name in FIBONACCI_LEVELS.items():
-        if fib_level in signal_lower:
-            return fib_name
     
     if "bullish" in signal_lower and "bos" in signal_lower:
         return "كسر هيكل صعودي"
@@ -286,22 +270,13 @@ def extract_signal_name(raw_signal):
         return "انعكاس من منطقة ذروة شراء"
     elif "oversold" in signal_lower and "upward" in signal_lower:
         return "انعكاس من منطقة ذروة بيع"
-    elif "fibonacci" in signal_lower or "fib" in signal_lower:
-        return "إشارة فيبوناتشي"
-    elif "luxalgo" in signal_lower:
-        return "إشارة LuxAlgo"
     else:
         return "إشارة تداول"
 
-# ✅ استخراج نوع الإشارة الأساسي (محدث مع فيبوناتشي)
+# ✅ استخراج نوع الإشارة الأساسي
 def extract_signal_type(signal_text):
     """استخراج النوع الأساسي للإشارة (للبصمة)"""
     signal_lower = signal_text.lower()
-    
-    # التحقق من مستويات فيبوناتشي أولاً
-    for fib_level in FIBONACCI_LEVELS.keys():
-        if fib_level in signal_lower:
-            return f"fib_{fib_level}"
     
     if "confluence" in signal_lower:
         return "confluence"
@@ -315,10 +290,6 @@ def extract_signal_type(signal_text):
         return "overbought"
     elif "oversold" in signal_lower:
         return "oversold"
-    elif "fibonacci" in signal_lower or "fib" in signal_lower:
-        return "fibonacci"
-    elif "luxalgo" in signal_lower:
-        return "luxalgo"
     elif "bullish" in signal_lower:
         return "bullish"
     elif "bearish" in signal_lower:
@@ -359,7 +330,7 @@ def process_alerts(alerts):
             ticker = extract_symbol(signal)
 
         if ticker == "UNKNOWN":
-            print(f"⚠️ Could not extract symbol from: {signal}")
+            print(f"⚠️ Could not extract symbol from: {signal")
             continue
 
         # تحديد الاتجاه تلقائياً من الإشارة
@@ -535,7 +506,6 @@ def home():
         "active_signals": {k: {ky: len(v) if ky in ["bullish", "bearish"] else v for ky, v in val.items()} for k, val in signal_memory.items()},
         "duplicate_timeframe": f"{DUPLICATE_TIMEFRAME} seconds",
         "required_signals": REQUIRED_SIGNALS,
-        "fibonacci_levels": list(FIBONACCI_LEVELS.keys()),
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -564,7 +534,6 @@ if __name__ == "__main__":
     print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
     print(f"🟢 Saudi Timezone: UTC+{TIMEZONE_OFFSET}")
     print(f"🟢 Required signals: {REQUIRED_SIGNALS}")
-    print(f"🟢 Fibonacci levels: {', '.join(FIBONACCI_LEVELS.keys())}")
     print(f"🟢 Duplicate prevention: {DUPLICATE_TIMEFRAME} seconds")
     print(f"🟢 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
     print("🟢 Waiting for TradingView webhooks...")
