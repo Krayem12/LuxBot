@@ -155,28 +155,10 @@ def extract_symbol(message):
     
     return "SPX500"  # Default
 
-# Extract signal name from message
+# Extract signal name from message - keep original name as received from TradingView
 def extract_signal_name(raw_signal):
-    signal_lower = raw_signal.lower()
-    
-    if "bullish" in signal_lower and "bos" in signal_lower:
-        return "كسر هيكل صعودي"
-    elif "bearish" in signal_lower and "bos" in signal_lower:
-        return "كسر هيكل هبوطي"
-    elif "bullish" in signal_lower and "choch" in signal_lower:
-        return "تغير Character صعودي"
-    elif "bearish" in signal_lower and "choch" in signal_lower:
-        return "تغير Character هبوطي"
-    elif "bullish" in signal_lower and "confluence" in signal_lower:
-        return "تقارب صعودي قوي"
-    elif "bearish" in signal_lower and "confluence" in signal_lower:
-        return "تقارب هبوطي قوي"
-    elif "bullish" in signal_lower:
-        return "إشارة صعودية"
-    elif "bearish" in signal_lower:
-        return "إشارة هبوطية"
-    else:
-        return raw_signal  # Return original text if not recognized
+    # Return the original signal name without translation
+    return raw_signal
 
 # Process alerts with condition of at least two signals
 def process_alerts(alerts):
@@ -225,30 +207,30 @@ def process_alerts(alerts):
             if len(signals[direction]) >= REQUIRED_SIGNALS:  # At least two signals
                 signal_count = len(signals[direction])
                 
-                # Extract signal name from last stored signal
-                last_signal = signals[direction][-1][0] if signals[direction] else "إشارة"
+                # Extract signal name from last stored signal (keep original)
+                last_signal = signals[direction][-1][0] if signals[direction] else "Signal"
                 signal_name = extract_signal_name(last_signal)
                 
                 # Get Saudi time
                 saudi_time = get_saudi_time()
                 
                 if direction == "bullish":
-                    message = f"""🚀 <b>{symbol} - إشارة صعودية</b>
+                    message = f"""🚀 <b>{symbol} - Bullish Signal</b>
 
-📊 <b>نوع الإشارة:</b> {signal_name}
-🔢 <b>عدد الإشارات:</b> {signal_count}
-⏰ <b>التوقيت السعودي:</b> {saudi_time}
+📊 <b>Signal Type:</b> {signal_name}
+🔢 <b>Number of Signals:</b> {signal_count}
+⏰ <b>Saudi Time:</b> {saudi_time}
 
-<code>انطلاق صعودي متوقع</code>"""
+<code>Expected upward movement</code>"""
                     signal_type = "BULLISH_CONFIRMATION"
                 else:
-                    message = f"""📉 <b>{symbol} - إشارة هبوطية</b>
+                    message = f"""📉 <b>{symbol} - Bearish Signal</b>
 
-📊 <b>نوع الإشارة:</b> {signal_name}
-🔢 <b>عدد الإشارات:</b> {signal_count}
-⏰ <b>التوقيت السعودي:</b> {saudi_time}
+📊 <b>Signal Type:</b> {signal_name}
+🔢 <b>Number of Signals:</b> {signal_count}
+⏰ <b>Saudi Time:</b> {saudi_time}
 
-<code>انطلاق هبوطي متوقع</code>"""
+<code>Expected downward movement</code>"""
                     signal_type = "BEARISH_CONFIRMATION"
                 
                 # Send to Telegram (with HTML formatting)
