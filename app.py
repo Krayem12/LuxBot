@@ -24,6 +24,12 @@ CACHE_TIMEOUT = 300
 def get_saudi_time():
     return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
 
+# Convert UTC time to Saudi time
+def convert_to_saudi_time(utc_time):
+    if isinstance(utc_time, datetime):
+        return (utc_time + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
+    return "Unknown"
+
 # Optimized HTML tag removal
 def remove_html_tags(text):
     if not text:
@@ -191,14 +197,14 @@ def get_current_signals_info(symbol, direction):
     
     info = f"Current: {signal_count} signals, Unique: {unique_count} types"
     
-    # Add signal names with timestamps if there are signals
+    # Add signal names with Saudi timestamps if there are signals
     if unique_signals:
         info += f"\n📋 Current signals:\n"
         for i, signal_name in enumerate(list(unique_signals)[:10], 1):
-            # Find the first occurrence of this signal
+            # Find the first occurrence of this signal and convert to Saudi time
             first_occurrence = next((ts for sig, ts in signal_details if sig == signal_name), None)
-            time_str = first_occurrence.strftime('%H:%M:%S') if first_occurrence else "Unknown"
-            info += f"   {i}. {signal_name} (since {time_str})\n"
+            time_str = convert_to_saudi_time(first_occurrence) if first_occurrence else "Unknown"
+            info += f"   {i}. {signal_name} (since {time_str} KSA)\n"
     
     return info
 
@@ -247,11 +253,13 @@ def process_alerts(alerts):
         if len(current_signals) >= MAX_SIGNALS_PER_SYMBOL:
             current_signals.pop(0)
         
-        current_signals.append((signal, datetime.utcnow()))
+        current_time = datetime.utcnow()
+        current_signals.append((signal, current_time))
         
-        # Log each stored signal with cleaned name
+        # Log each stored signal with cleaned name and Saudi time
         clean_signal_name = extract_clean_signal_name(signal)
-        print(f"✅ Stored {direction} signal for {ticker}: {clean_signal_name}")
+        saudi_time = convert_to_saudi_time(current_time)
+        print(f"✅ Stored {direction} signal for {ticker}: {clean_signal_name} (at {saudi_time} KSA)")
 
     # Clean up periodically
     if random.random() < 0.3:
