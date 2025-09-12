@@ -12,7 +12,7 @@ app = Flask(__name__)
 TIMEZONE_OFFSET = 3  # +3 hours for Saudi time
 
 # Number of required signals (changed from 1 to 2)
-REQUIRED_SIGNALS = 2
+REQUIRED_SIGNALS = 4
 
 # Telegram credentials
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
