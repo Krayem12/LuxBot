@@ -155,10 +155,16 @@ def extract_symbol(message):
     
     return "SPX500"  # Default
 
-# Extract signal name from message - keep original name as received from TradingView
-def extract_signal_name(raw_signal):
-    # Return the original signal name without translation
-    return raw_signal
+# Extract clean signal name without timestamps/numbers
+def extract_clean_signal_name(raw_signal):
+    """Remove timestamps and numbers from signal name"""
+    # Remove timestamp patterns like _1757666714.691848
+    clean_signal = re.sub(r'_\d+\.\d+', '', raw_signal)
+    # Remove any standalone numbers
+    clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
+    # Remove extra spaces and trim
+    clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
+    return clean_signal if clean_signal else raw_signal
 
 # Process alerts with condition of at least two signals
 def process_alerts(alerts):
@@ -207,30 +213,42 @@ def process_alerts(alerts):
             if len(signals[direction]) >= REQUIRED_SIGNALS:  # At least two signals
                 signal_count = len(signals[direction])
                 
-                # Extract signal name from last stored signal (keep original)
-                last_signal = signals[direction][-1][0] if signals[direction] else "Signal"
-                signal_name = extract_signal_name(last_signal)
+                # Get all signal names (clean without timestamps/numbers)
+                all_signals = []
+                for sig, ts in signals[direction]:
+                    clean_signal = extract_clean_signal_name(sig)
+                    all_signals.append(clean_signal)
+                
+                # Remove duplicates while preserving order
+                unique_signals = []
+                for signal in all_signals:
+                    if signal not in unique_signals:
+                        unique_signals.append(signal)
                 
                 # Get Saudi time
                 saudi_time = get_saudi_time()
                 
                 if direction == "bullish":
-                    message = f"""🚀 <b>{symbol} - Bullish Signal</b>
+                    message = f"""🚀 <b>{symbol} - Bullish Signal Confirmation</b>
 
-📊 <b>Signal Type:</b> {signal_name}
+📊 <b>Signal Types:</b>
+{chr(10).join([f'• {signal}' for signal in unique_signals])}
+
 🔢 <b>Number of Signals:</b> {signal_count}
 ⏰ <b>Saudi Time:</b> {saudi_time}
 
-<code>Expected upward movement</code>"""
+<code>Strong bullish confirmation - Expected upward movement</code>"""
                     signal_type = "BULLISH_CONFIRMATION"
                 else:
-                    message = f"""📉 <b>{symbol} - Bearish Signal</b>
+                    message = f"""📉 <b>{symbol} - Bearish Signal Confirmation</b>
 
-📊 <b>Signal Type:</b> {signal_name}
+📊 <b>Signal Types:</b>
+{chr(10).join([f'• {signal}' for signal in unique_signals])}
+
 🔢 <b>Number of Signals:</b> {signal_count}
 ⏰ <b>Saudi Time:</b> {saudi_time}
 
-<code>Expected downward movement</code>"""
+<code>Strong bearish confirmation - Expected downward movement</code>"""
                     signal_type = "BEARISH_CONFIRMATION"
                 
                 # Send to Telegram (with HTML formatting)
