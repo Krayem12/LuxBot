@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # Saudi time settings (UTC+3)
 TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 2  # Changed to 2 for testing
+REQUIRED_SIGNALS = 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
@@ -140,15 +140,32 @@ def extract_symbol(message):
     
     return "UNKNOWN"
 
-# Optimized signal name cleaning - CORRECTED FUNCTION NAME
+# Improved signal name cleaning - remove stock symbols and timestamps
 def extract_clean_signal_name(raw_signal):
     cache_key = f"signal_{hash(raw_signal)}"
     if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
         return signal_cache[cache_key]['value']
     
+    # Remove timestamps
     clean_signal = re.sub(r'_\d+\.\d+', '', raw_signal)
+    
+    # Remove numbers
     clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
+    
+    # Remove stock symbols from the signal text
+    for symbol in STOCK_LIST:
+        clean_signal = clean_signal.replace(symbol, '').replace(symbol.lower(), '')
+    
+    # Remove known patterns
+    for pattern, symbol in _symbol_patterns:
+        clean_signal = clean_signal.replace(pattern, '').replace(pattern.lower(), '')
+    
+    # Remove special Unicode characters (like directional marks)
+    clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
+    
+    # Clean up extra spaces and trim
     clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
+    
     result = clean_signal if clean_signal else "Unknown Signal"
     
     signal_cache[cache_key] = {'value': result, 'time': time.time()}
@@ -163,38 +180,43 @@ def get_current_signals_info(symbol, direction):
     
     # Get unique signal names
     unique_signals = set()
+    signal_details = []
     for sig, ts in signals:
         clean_signal = extract_clean_signal_name(sig)
         unique_signals.add(clean_signal)
+        signal_details.append((clean_signal, ts))
     
     signal_count = len(signals)
     unique_count = len(unique_signals)
     
     info = f"Current: {signal_count} signals, Unique: {unique_count} types"
     
-    # Add signal names if there are signals
+    # Add signal names with timestamps if there are signals
     if unique_signals:
         info += f"\n📋 Current signals:\n"
         for i, signal_name in enumerate(list(unique_signals)[:10], 1):
-            info += f"   {i}. {signal_name}\n"
+            # Find the first occurrence of this signal
+            first_occurrence = next((ts for sig, ts in signal_details if sig == signal_name), None)
+            time_str = first_occurrence.strftime('%H:%M:%S') if first_occurrence else "Unknown"
+            info += f"   {i}. {signal_name} (since {time_str})\n"
     
     return info
 
-# Optimized signal uniqueness check - CORRECTED FUNCTION NAME
+# Optimized signal uniqueness check
 def has_required_different_signals(signals_list):
     if len(signals_list) < REQUIRED_SIGNALS:
         return False, []
     
     unique_signals = set()
     for sig, ts in signals_list:
-        clean_signal = extract_clean_signal_name(sig)  # CORRECTED: extract_clean_signal_name
+        clean_signal = extract_clean_signal_name(sig)
         unique_signals.add(clean_signal)
         if len(unique_signals) >= REQUIRED_SIGNALS:
             return True, list(unique_signals)
     
     return False, list(unique_signals)
 
-# Optimized alert processing
+# Optimized alert processing with better logging
 def process_alerts(alerts):
     start_time = time.time()
     
@@ -226,7 +248,10 @@ def process_alerts(alerts):
             current_signals.pop(0)
         
         current_signals.append((signal, datetime.utcnow()))
-        print(f"✅ Stored {direction} signal for {ticker}: {signal}")
+        
+        # Log each stored signal with cleaned name
+        clean_signal_name = extract_clean_signal_name(signal)
+        print(f"✅ Stored {direction} signal for {ticker}: {clean_signal_name}")
 
     # Clean up periodically
     if random.random() < 0.3:
@@ -236,7 +261,9 @@ def process_alerts(alerts):
     for symbol, signals in list(signal_memory.items()):
         for direction in ["bullish", "bearish"]:
             signal_count = len(signals[direction])
-            if signal_count >= REQUIRED_SIGNALS:
+            if signal_count > 0:
+                # Always show progress, not just when waiting
+                signals_info = get_current_signals_info(symbol, direction)
                 has_required, unique_signals = has_required_different_signals(signals[direction])
                 
                 if has_required:
@@ -273,8 +300,6 @@ def process_alerts(alerts):
                     signal_memory[symbol][direction] = []
                     
                 else:
-                    # Show detailed information about current signals
-                    signals_info = get_current_signals_info(symbol, direction)
                     print(f"⏳ Waiting for different signals for {symbol} ({direction})")
                     print(f"   {signals_info}")
                     print(f"   Need {REQUIRED_SIGNALS} different signals, currently have {len(unique_signals)}")
@@ -282,12 +307,6 @@ def process_alerts(alerts):
                     # Break early if processing taking too long
                     if time.time() - start_time > 2.0:
                         return
-            else:
-                # Show progress for symbols that don't have enough signals yet
-                signals_info = get_current_signals_info(symbol, direction)
-                if signals_info != "No signals yet":
-                    print(f"📊 Progress for {symbol} ({direction}): {signal_count}/{REQUIRED_SIGNALS} signals")
-                    print(f"   {signals_info}")
 
 # Log incoming request information
 @app.before_request
