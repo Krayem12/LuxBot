@@ -140,7 +140,7 @@ def extract_symbol(message):
     
     return "UNKNOWN"
 
-# Optimized signal name cleaning
+# Optimized signal name cleaning - CORRECTED FUNCTION NAME
 def extract_clean_signal_name(raw_signal):
     cache_key = f"signal_{hash(raw_signal)}"
     if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
@@ -180,14 +180,14 @@ def get_current_signals_info(symbol, direction):
     
     return info
 
-# Optimized signal uniqueness check
+# Optimized signal uniqueness check - CORRECTED FUNCTION NAME
 def has_required_different_signals(signals_list):
     if len(signals_list) < REQUIRED_SIGNALS:
         return False, []
     
     unique_signals = set()
     for sig, ts in signals_list:
-        clean_signal = extremact_clean_signal_name(sig)
+        clean_signal = extract_clean_signal_name(sig)  # CORRECTED: extract_clean_signal_name
         unique_signals.add(clean_signal)
         if len(unique_signals) >= REQUIRED_SIGNALS:
             return True, list(unique_signals)
