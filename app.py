@@ -15,7 +15,11 @@ TIMEZONE_OFFSET = 3
 REQUIRED_SIGNALS = 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
-TEST_MODE = True
+
+# Control flags - Trend enabled, Regular disabled
+TREND_SIGNALS_ENABLED = True
+REGULAR_SIGNALS_ENABLED = False
+TEST_MODE = False
 
 # Cache for processed signals
 signal_cache = {}
@@ -43,6 +47,20 @@ def remove_html_tags(text):
 # Send Telegram message
 session = requests.Session()
 def send_telegram_to_all(message):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        response = session.post(url, json=payload, timeout=3)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+# Send control message to Telegram
+def send_control_message(message):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {
@@ -93,6 +111,9 @@ def extract_clean_signal_name(raw_signal):
 
 # Detect Trend signals Bullish Turn + and Bearish Turn +
 def check_and_update_trend_signals(signal_text, symbol):
+    if not TREND_SIGNALS_ENABLED:
+        return False
+        
     signal_upper = signal_text.upper()
     is_trend_signal = False
     
@@ -147,6 +168,9 @@ def has_required_different_signals(signals_list):
     return False, list(unique_signals)
 
 def check_trend_alignment(symbol, direction):
+    if not TREND_SIGNALS_ENABLED:
+        return True
+        
     trend_catcher = trend_signals[symbol]["trend_catcher"]
     trend_tracer = trend_signals[symbol]["trend_tracer"]
     
@@ -182,6 +206,52 @@ def get_trend_status(symbol):
     
     return "\n".join(status)
 
+# Process control commands
+def process_control_command(command):
+    global TREND_SIGNALS_ENABLED, REGULAR_SIGNALS_ENABLED, TEST_MODE
+    
+    command_lower = command.lower().strip()
+    
+    if command_lower == "trend true":
+        TREND_SIGNALS_ENABLED = True
+        return "✅ Trend signals enabled"
+    
+    elif command_lower == "trend false":
+        TREND_SIGNALS_ENABLED = False
+        return "❌ Trend signals disabled"
+    
+    elif command_lower == "regular true":
+        REGULAR_SIGNALS_ENABLED = True
+        return "✅ Regular signals enabled"
+    
+    elif command_lower == "regular false":
+        REGULAR_SIGNALS_ENABLED = False
+        return "❌ Regular signals disabled"
+    
+    elif command_lower == "test true":
+        TEST_MODE = True
+        return "✅ Test mode enabled"
+    
+    elif command_lower == "test false":
+        TEST_MODE = False
+        return "❌ Test mode disabled"
+    
+    elif command_lower == "status":
+        status_msg = f"""📊 <b>Current Status:</b>
+
+🎯 <b>Trend Signals:</b> {'✅ ENABLED' if TREND_SIGNALS_ENABLED else '❌ DISABLED'}
+📈 <b>Regular Signals:</b> {'✅ ENABLED' if REGULAR_SIGNALS_ENABLED else '❌ DISABLED'}
+🧪 <b>Test Mode:</b> {'✅ ENABLED' if TEST_MODE else '❌ DISABLED'}
+
+⚙️ <b>Available Commands:</b>
+• trend true/false
+• regular true/false  
+• test true/false
+• status"""
+        return status_msg
+    
+    return "❓ Unknown command. Available: trend true/false, regular true/false, test true/false, status"
+
 def process_alerts(alerts):
     for alert in alerts:
         if isinstance(alert, dict):
@@ -194,6 +264,13 @@ def process_alerts(alerts):
         if not signal:
             continue
 
+        # Check if it's a control command
+        if signal.lower().startswith(('trend ', 'regular ', 'test ', 'status')):
+            result = process_control_command(signal)
+            send_control_message(result)
+            print(f"🔧 Control command processed: {signal}")
+            continue
+
         if not ticker or ticker == "UNKNOWN":
             ticker = extract_symbol(signal)
 
@@ -204,7 +281,7 @@ def process_alerts(alerts):
 
         is_trend_signal = check_and_update_trend_signals(signal, ticker)
         
-        if not is_trend_signal:
+        if not is_trend_signal and REGULAR_SIGNALS_ENABLED:
             signal_lower = signal.lower()
             direction = "bearish" if any(word in signal_lower for word in ["bearish", "down", "put", "short", "sell"]) else "bullish"
 
@@ -221,11 +298,16 @@ def process_alerts(alerts):
             clean_signal_name = extract_clean_signal_name(signal)
             saudi_time = convert_to_saudi_time(current_time)
             print(f"✅ Regular {direction} signal for {ticker}: {clean_signal_name} (at {saudi_time})")
-        else:
+        elif is_trend_signal:
             print(f"📊 Processed trend signal for {ticker}")
+        else:
+            print(f"⏸️ Regular signals disabled - ignoring signal for {ticker}")
 
     if random.random() < 0.3:
         cleanup_signals()
+
+    if not REGULAR_SIGNALS_ENABLED:
+        return  # Skip signal processing if regular signals are disabled
 
     for symbol, signals in list(signal_memory.items()):
         for direction in ["bullish", "bearish"]:
@@ -238,7 +320,7 @@ def process_alerts(alerts):
                     saudi_time = get_saudi_time()
                     trend_status = get_trend_status(symbol)
                     
-                    # Telegram messages remain in Arabic
+                    # Telegram messages in Arabic
                     if direction == "bullish":
                         message = f"""🚀 <b>{symbol} - تأكيد دخول صفقة شراء</b>
 
@@ -322,6 +404,27 @@ def webhook():
         print(f"❌ Error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)})
 
+@app.route("/control", methods=["POST", "GET"])
+def control():
+    """Endpoint for control commands"""
+    try:
+        if request.method == "GET":
+            return jsonify({
+                "trend_signals_enabled": TREND_SIGNALS_ENABLED,
+                "regular_signals_enabled": REGULAR_SIGNALS_ENABLED,
+                "test_mode": TEST_MODE
+            })
+        
+        command = request.get_data(as_text=True).strip()
+        if command:
+            result = process_control_command(command)
+            return jsonify({"status": "processed", "result": result})
+        else:
+            return jsonify({"status": "error", "message": "No command provided"})
+            
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
 @app.route("/")
 def home():
     return jsonify({
@@ -329,14 +432,23 @@ def home():
         "message": "TradingView Webhook Receiver",
         "monitored_stocks": STOCK_LIST,
         "required_signals": REQUIRED_SIGNALS,
+        "trend_signals_enabled": TREND_SIGNALS_ENABLED,
+        "regular_signals_enabled": REGULAR_SIGNALS_ENABLED,
         "test_mode": TEST_MODE,
-        "trend_signals": {k: v for k, v in trend_signals.items()}
+        "control_commands": [
+            "trend true/false - Enable/disable trend signals",
+            "regular true/false - Enable/disable regular signals", 
+            "test true/false - Enable/disable test mode",
+            "status - Show current status"
+        ]
     })
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"🟢 Starting server on port {port}")
-    print(f"🟢 Test mode: {TEST_MODE}")
+    print(f"🟢 Trend signals: {'ENABLED' if TREND_SIGNALS_ENABLED else 'DISABLED'}")
+    print(f"🟢 Regular signals: {'ENABLED' if REGULAR_SIGNALS_ENABLED else 'DISABLED'}")
+    print(f"🟢 Test mode: {'ENABLED' if TEST_MODE else 'DISABLED'}")
+    print("🟢 Control commands: trend true/false, regular true/false, test true/false, status")
     print("🟢 Ready to receive webhooks...")
-    print("🟢 Expected trend signals: Bullish Turn +, Bearish Turn +")
     app.run(host="0.0.0.0", port=port, debug=False)
