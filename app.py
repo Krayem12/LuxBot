@@ -28,6 +28,12 @@ trend_signals = defaultdict(lambda: {"trend_catcher": None, "trend_tracer": None
 def get_saudi_time():
     return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
 
+# تحويل الوقت UTC إلى الوقت السعودي
+def convert_to_saudi_time(utc_time):
+    if isinstance(utc_time, datetime):
+        return (utc_time + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
+    return "غير معروف"
+
 # إزالة وسوم HTML
 def remove_html_tags(text):
     if not text:
@@ -234,6 +240,19 @@ def process_alerts(alerts):
                     if telegram_success:
                         print(f"🎉 تم إرسال تنبيه لـ {symbol} ({direction})")
                         signal_memory[symbol][direction] = []
+                else:
+                    print(f"⏳ في انتظار شروط التنبيه لـ {symbol} ({direction})")
+
+@app.before_request
+def log_requests():
+    print(f"📨 Request: {request.method} {request.path}")
+
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'POST, GET')
+    return response
 
 @app.route("/webhook", methods=["POST", "GET"])
 def webhook():
