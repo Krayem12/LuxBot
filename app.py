@@ -10,37 +10,37 @@ import random
 
 app = Flask(__name__)
 
-# إعدادات الوقت السعودي (UTC+3)
+# Settings (UTC+3)
 TIMEZONE_OFFSET = 3
 REQUIRED_SIGNALS = 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
-TEST_MODE = True  # True للاختبار بدون إشارات ترند
+TEST_MODE = True
 
-# كاش للإشارات المعالجة
+# Cache for processed signals
 signal_cache = {}
 CACHE_TIMEOUT = 300
 
-# تتبع إشارات Trend
+# Track Trend signals
 trend_signals = defaultdict(lambda: {"trend_catcher": None, "trend_tracer": None})
 
-# الحصول على الوقت السعودي
+# Get Saudi time
 def get_saudi_time():
     return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
 
-# تحويل الوقت UTC إلى الوقت السعودي
+# Convert UTC to Saudi time
 def convert_to_saudi_time(utc_time):
     if isinstance(utc_time, datetime):
         return (utc_time + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
-    return "غير معروف"
+    return "Unknown"
 
-# إزالة وسوم HTML
+# Remove HTML tags
 def remove_html_tags(text):
     if not text:
         return text
     return re.sub('<.*?>', '', text)
 
-# إرسال رسالة التليجرام
+# Send Telegram message
 session = requests.Session()
 def send_telegram_to_all(message):
     try:
@@ -55,14 +55,14 @@ def send_telegram_to_all(message):
     except Exception:
         return False
 
-# قائمة الأسهم
+# Stock list
 STOCK_LIST = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30"]
 
-# ذاكرة الإشارات العادية
+# Memory for regular signals
 MAX_SIGNALS_PER_SYMBOL = 20
 signal_memory = defaultdict(lambda: {"bullish": [], "bearish": []})
 
-# تنظيف الإشارات العادية
+# Clean up old signals
 def cleanup_signals():
     cutoff = datetime.utcnow() - timedelta(minutes=15)
     for symbol in list(signal_memory.keys()):
@@ -89,29 +89,46 @@ def extract_clean_signal_name(raw_signal):
     for symbol in STOCK_LIST:
         clean_signal = clean_signal.replace(symbol, '').replace(symbol.lower(), '')
     clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
-    return clean_signal if clean_signal else "إشارة غير معروفة"
+    return clean_signal if clean_signal else "Unknown Signal"
 
+# Detect Trend signals Bullish Turn + and Bearish Turn +
 def check_and_update_trend_signals(signal_text, symbol):
-    signal_lower = signal_text.lower()
+    signal_upper = signal_text.upper()
     is_trend_signal = False
     
-    if 'trend' in signal_lower or 'catcher' in signal_lower or 'tracer' in signal_lower:
+    # Detect Bullish Turn +
+    if "BULLISH TURN +" in signal_upper:
+        trend_signals[symbol]["trend_catcher"] = ("bullish", datetime.utcnow())
+        print(f"📊 Trend Catcher: bullish for {symbol} (Bullish Turn +)")
+        is_trend_signal = True
+    
+    # Detect Bearish Turn +
+    elif "BEARISH TURN +" in signal_upper:
+        trend_signals[symbol]["trend_catcher"] = ("bearish", datetime.utcnow())
+        print(f"📊 Trend Catcher: bearish for {symbol} (Bearish Turn +)")
+        is_trend_signal = True
+    
+    # Detect other trend signals
+    elif "TURN +" in signal_upper:
+        if "BULLISH" in signal_upper:
+            trend_signals[symbol]["trend_catcher"] = ("bullish", datetime.utcnow())
+            print(f"📊 Trend Catcher: bullish for {symbol}")
+            is_trend_signal = True
+        elif "BEARISH" in signal_upper:
+            trend_signals[symbol]["trend_catcher"] = ("bearish", datetime.utcnow())
+            print(f"📊 Trend Catcher: bearish for {symbol}")
+            is_trend_signal = True
+    
+    # Detect Trend Tracer signals
+    signal_lower = signal_text.lower()
+    if 'tracer' in signal_lower:
         if any(word in signal_lower for word in ["bullish", "up", "call", "long", "buy"]):
-            direction = "bullish"
+            trend_signals[symbol]["trend_tracer"] = ("bullish", datetime.utcnow())
+            print(f"📊 Trend Tracer: bullish for {symbol}")
+            is_trend_signal = True
         elif any(word in signal_lower for word in ["bearish", "down", "put", "short", "sell"]):
-            direction = "bearish"
-        else:
-            return True
-        
-        if 'catcher' in signal_lower:
-            trend_signals[symbol]["trend_catcher"] = (direction, datetime.utcnow())
-            print(f"📊 Trend Catcher: {direction} لـ {symbol}")
-            is_trend_signal = True
-        elif 'tracer' in signal_lower:
-            trend_signals[symbol]["trend_tracer"] = (direction, datetime.utcnow())
-            print(f"📊 Trend Tracer: {direction} لـ {symbol}")
-            is_trend_signal = True
-        else:
+            trend_signals[symbol]["trend_tracer"] = ("bearish", datetime.utcnow())
+            print(f"📊 Trend Tracer: bearish for {symbol}")
             is_trend_signal = True
     
     return is_trend_signal
@@ -134,10 +151,14 @@ def check_trend_alignment(symbol, direction):
     trend_tracer = trend_signals[symbol]["trend_tracer"]
     
     if trend_catcher and trend_catcher[0] == direction:
-        return True
-    if trend_tracer and trend_tracer[0] == direction:
+        print(f"✅ Trend Catcher aligned with {direction} for {symbol}")
         return True
     
+    if trend_tracer and trend_tracer[0] == direction:
+        print(f"✅ Trend Tracer aligned with {direction} for {symbol}")
+        return True
+    
+    print(f"❌ Trend signals not aligned with {direction} for {symbol}")
     return False
 
 def get_trend_status(symbol):
@@ -147,15 +168,17 @@ def get_trend_status(symbol):
     status = []
     if trend_catcher:
         time_str = convert_to_saudi_time(trend_catcher[1])
-        status.append(f"Trend Catcher: {trend_catcher[0]} (منذ {time_str})")
+        direction_emoji = "📈" if trend_catcher[0] == "bullish" else "📉"
+        status.append(f"{direction_emoji} Trend Catcher: {trend_catcher[0]} (since {time_str})")
     else:
-        status.append("Trend Catcher: غير متوفر")
+        status.append("❓ Trend Catcher: Not available")
     
     if trend_tracer:
         time_str = convert_to_saudi_time(trend_tracer[1])
-        status.append(f"Trend Tracer: {trend_tracer[0]} (منذ {time_str})")
+        direction_emoji = "📈" if trend_tracer[0] == "bullish" else "📉"
+        status.append(f"{direction_emoji} Trend Tracer: {trend_tracer[0]} (since {time_str})")
     else:
-        status.append("Trend Tracer: غير متوفر")
+        status.append("❓ Trend Tracer: Not available")
     
     return "\n".join(status)
 
@@ -177,6 +200,8 @@ def process_alerts(alerts):
         if ticker == "UNKNOWN":
             continue
 
+        print(f"📩 Incoming signal: {signal}")
+
         is_trend_signal = check_and_update_trend_signals(signal, ticker)
         
         if not is_trend_signal:
@@ -195,7 +220,9 @@ def process_alerts(alerts):
             
             clean_signal_name = extract_clean_signal_name(signal)
             saudi_time = convert_to_saudi_time(current_time)
-            print(f"✅ إشارة عادية {direction} لـ {ticker}: {clean_signal_name} (في {saudi_time})")
+            print(f"✅ Regular {direction} signal for {ticker}: {clean_signal_name} (at {saudi_time})")
+        else:
+            print(f"📊 Processed trend signal for {ticker}")
 
     if random.random() < 0.3:
         cleanup_signals()
@@ -211,37 +238,42 @@ def process_alerts(alerts):
                     saudi_time = get_saudi_time()
                     trend_status = get_trend_status(symbol)
                     
+                    # Telegram messages remain in Arabic
                     if direction == "bullish":
                         message = f"""🚀 <b>{symbol} - تأكيد دخول صفقة شراء</b>
 
-📊 <b>الإشارات المؤكدة:</b>
+📊 <b>الإشارات المؤكدة ({len(unique_signals)}):</b>
 {chr(10).join([f'• {signal}' for signal in unique_signals])}
 
 🎯 <b>حالة إشارات الترند:</b>
 {trend_status}
 
+🔢 <b>عدد الإشارات العادية:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
-<code>تأكيد دخول صفقة شراء</code>"""
+<code>تأكيد دخول صفقة شراء - {'إشارات الترند متوافقة' if trend_aligned else 'وضع الاختبار'}</code>"""
                     else:
                         message = f"""📉 <b>{symbol} - تأكيد دخول صفقة بيع</b>
 
-📊 <b>الإشارات المؤكدة:</b>
+📊 <b>الإشارات المؤكدة ({len(unique_signals)}):</b>
 {chr(10).join([f'• {signal}' for signal in unique_signals])}
 
 🎯 <b>حالة إشارات الترند:</b>
 {trend_status}
 
+🔢 <b>عدد الإشارات العادية:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
-<code>تأكيد دخول صفقة بيع</code>"""
+<code>تأكيد دخول صفقة بيع - {'إشارات الترند متوافقة' if trend_aligned else 'وضع الاختبار'}</code>"""
                     
                     telegram_success = send_telegram_to_all(message)
                     if telegram_success:
-                        print(f"🎉 تم إرسال تنبيه لـ {symbol} ({direction})")
+                        print(f"🎉 Alert sent for {symbol} ({direction})")
                         signal_memory[symbol][direction] = []
                 else:
-                    print(f"⏳ في انتظار شروط التنبيه لـ {symbol} ({direction})")
+                    print(f"⏳ Waiting for conditions for {symbol} ({direction})")
+                    print(f"   Need {REQUIRED_SIGNALS} different regular signals, currently have {len(unique_signals)}")
+                    print(f"   {get_trend_status(symbol)}")
 
 @app.before_request
 def log_requests():
@@ -278,7 +310,7 @@ def webhook():
             if raw_data:
                 alerts = [{"signal": raw_data}]
         
-        print(f"🔍 معالجة {len(alerts)} تنبيه(ات)")
+        print(f"🔍 Processing {len(alerts)} alert(s)")
         
         if alerts:
             process_alerts(alerts)
@@ -287,7 +319,7 @@ def webhook():
             return jsonify({"status": "no_alerts"})
             
     except Exception as e:
-        print(f"❌ خطأ: {str(e)}")
+        print(f"❌ Error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)})
 
 @app.route("/")
@@ -297,12 +329,14 @@ def home():
         "message": "TradingView Webhook Receiver",
         "monitored_stocks": STOCK_LIST,
         "required_signals": REQUIRED_SIGNALS,
-        "test_mode": TEST_MODE
+        "test_mode": TEST_MODE,
+        "trend_signals": {k: v for k, v in trend_signals.items()}
     })
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    print(f"🟢 بدء الخادم على البورت {port}")
-    print(f"🟢 وضع الاختبار: {TEST_MODE}")
-    print("🟢 جاهز لاستقبال webhooks...")
+    print(f"🟢 Starting server on port {port}")
+    print(f"🟢 Test mode: {TEST_MODE}")
+    print("🟢 Ready to receive webhooks...")
+    print("🟢 Expected trend signals: Bullish Turn +, Bearish Turn +")
     app.run(host="0.0.0.0", port=port, debug=False)
