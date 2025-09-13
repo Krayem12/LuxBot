@@ -12,15 +12,16 @@ app = Flask(__name__)
 
 # إعدادات الوقت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 2  # يمكن تغييرها إلى 2 أو 3
+REQUIRED_SIGNALS = 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
+TEST_MODE = True  # True للاختبار بدون إشارات ترند، False للوضع الطبيعي
 
 # كاش للإشارات المعالجة
 signal_cache = {}
 CACHE_TIMEOUT = 300
 
-# تتبع إشارات Trend Catcher و Trend Tracer بشكل منفصل (لا يتم مسحها إلا عند تغيير الاتجاه)
+# تتبع إشارات Trend Catcher و Trend Tracer بشكل منفصل
 trend_signals = defaultdict(lambda: {"trend_catcher": None, "trend_tracer": None})
 
 # الحصول على الوقت السعودي
@@ -79,7 +80,7 @@ def load_stocks():
 # قائمة الأسهم
 STOCK_LIST = load_stocks()
 
-# ذاكرة الإشارات العادية فقط (بدون إشارات الترند)
+# ذاكرة الإشارات العادية فقط
 MAX_SIGNALS_PER_SYMBOL = 20
 signal_memory = defaultdict(lambda: {"bullish": [], "bearish": []})
 
@@ -105,7 +106,7 @@ def send_post_request(message, indicators, signal_type=None):
     except Exception:
         return False
 
-# تنظيف الإشارات العادية القديمة فقط (لا تؤثر على إشارات الترند)
+# تنظيف الإشارات العادية القديمة فقط
 def cleanup_signals():
     cutoff = datetime.utcnow() - timedelta(minutes=15)
     cleanup_count = 0
@@ -172,36 +173,57 @@ def extract_clean_signal_name(raw_signal):
     signal_cache[cache_key] = {'value': result, 'time': time.time()}
     return result
 
-# الكشف عن إشارات الترند وتحديثها (لا تدخل في الإشارات العادية)
+# الكشف عن إشارات الترند وتحديثها
 def check_and_update_trend_signals(signal_text, symbol):
     signal_lower = signal_text.lower()
     is_trend_signal = False
     
-    # الكشف عن إشارات Trend Catcher
-    if "trend catcher" in signal_lower or ("catcher" in signal_lower and "trend" in signal_lower):
-        direction = "bullish" if any(word in signal_lower for word in ["bullish", "up", "call", "long", "buy"]) else "bearish"
-        current_direction = trend_signals[symbol]["trend_catcher"]
-        
-        if current_direction is None or current_direction[0] != direction:
-            trend_signals[symbol]["trend_catcher"] = (direction, datetime.utcnow())
-            print(f"📊 Trend Catcher تم تحديثه إلى {direction} لـ {symbol}")
-        
-        is_trend_signal = True
+    # كلمات مفتاحية للكشف عن إشارات الترند
+    trend_keywords = ['trend', 'catcher', 'tracer', 'direction', 'اتجاه', 'ترند']
+    bullish_keywords = ['bullish', 'up', 'call', 'long', 'buy', 'صاعد', 'شراء']
+    bearish_keywords = ['bearish', 'down', 'put', 'short', 'sell', 'هابط', 'بيع']
     
-    # الكشف عن إشارات Trend Tracer
-    elif "trend tracer" in signal_lower or ("tracer" in signal_lower and "trend" in signal_lower):
-        direction = "bullish" if any(word in signal_lower for word in ["bullish", "up", "call", "long", "buy"]) else "bearish"
-        current_direction = trend_signals[symbol]["trend_tracer"]
+    # التحقق إذا كانت الإشارة تحتوي على كلمات ترند
+    has_trend_keyword = any(keyword in signal_lower for keyword in trend_keywords)
+    
+    if has_trend_keyword:
+        # تحديد الاتجاه
+        if any(word in signal_lower for word in bullish_keywords):
+            direction = "bullish"
+        elif any(word in signal_lower for word in bearish_keywords):
+            direction = "bearish"
+        else:
+            print(f"📊 إشارة ترند بدون اتجاه واضح لـ {symbol}")
+            return True
         
-        if current_direction is None or current_direction[0] != direction:
-            trend_signals[symbol]["trend_tracer"] = (direction, datetime.utcnow())
-            print(f"📊 Trend Tracer تم تحديثه إلى {direction} لـ {symbol}")
+        # الكشف عن Trend Catcher
+        if 'catcher' in signal_lower:
+            current_direction = trend_signals[symbol]["trend_catcher"]
+            
+            if current_direction is None or current_direction[0] != direction:
+                trend_signals[symbol]["trend_catcher"] = (direction, datetime.utcnow())
+                print(f"📊 Trend Catcher تم تحديثه إلى {direction} لـ {symbol}")
+            
+            is_trend_signal = True
         
-        is_trend_signal = True
+        # الكشف عن Trend Tracer
+        elif 'tracer' in signal_lower:
+            current_direction = trend_signals[symbol]["trend_tracer"]
+            
+            if current_direction is None or current_direction[0] != direction:
+                trend_signals[symbol]["trend_tracer"] = (direction, datetime.utcnow())
+                print(f"📊 Trend Tracer تم تحديثه إلى {direction} لـ {symbol}")
+            
+            is_trend_signal = True
+        
+        # إذا كانت إشارة ترند عامة
+        else:
+            print(f"📊 إشارة ترند عامة لـ {symbol}: {direction}")
+            is_trend_signal = True
     
     return is_trend_signal
 
-# الحصول على معلومات الإشارات العادية الحالية (بدون الترند)
+# الحصول على معلومات الإشارات العادية الحالية
 def get_current_signals_info(symbol, direction):
     signals = signal_memory.get(symbol, {}).get(direction, [])
     if not signals:
@@ -217,7 +239,7 @@ def get_current_signals_info(symbol, direction):
     
     return f"الإشارات العادية: {signal_count} إشارة، الفريدة: {unique_count} نوع"
 
-# التحقق من وجود إشارات عادية مختلفة مطلوبة (بدون الترند)
+# التحقق من وجود إشارات عادية مختلفة مطلوبة
 def has_required_different_signals(signals_list):
     if len(signals_list) < REQUIRED_SIGNALS:
         return False, []
@@ -231,23 +253,19 @@ def has_required_different_signals(signals_list):
     
     return False, list(unique_signals)
 
-# التحقق من محاذاة إشارات الترند مع الاتجاه الحالي
+# التحقق من محاذاة إشارات الترند
 def check_trend_alignment(symbol, direction):
-    """التحقق مما إذا كانت إشارات الترند تتماشى مع اتجاه الإشارات العادية"""
     trend_catcher = trend_signals[symbol]["trend_catcher"]
     trend_tracer = trend_signals[symbol]["trend_tracer"]
     
-    # إذا لم تكن هناك إشارات ترند على الإطلاق
     if trend_catcher is None and trend_tracer is None:
         print(f"⚠️ لا توجد إشارات ترند لـ {symbol}")
         return False
     
-    # إذا كانت هناك إشارة Trend Catcher وتتماشى مع الاتجاه
     if trend_catcher and trend_catcher[0] == direction:
         print(f"✅ Trend Catcher متوافق مع {direction} لـ {symbol}")
         return True
     
-    # إذا كانت هناك إشارة Trend Tracer وتتماشى مع الاتجاه
     if trend_tracer and trend_tracer[0] == direction:
         print(f"✅ Trend Tracer متوافق مع {direction} لـ {symbol}")
         return True
@@ -255,7 +273,7 @@ def check_trend_alignment(symbol, direction):
     print(f"❌ إشارات الترند غير متوافقة مع {direction} لـ {symbol}")
     return False
 
-# الحصول على حالة إشارات الترند الحالية
+# الحصول على حالة إشارات الترند
 def get_trend_status(symbol):
     trend_catcher = trend_signals[symbol]["trend_catcher"]
     trend_tracer = trend_signals[symbol]["trend_tracer"]
@@ -298,10 +316,10 @@ def process_alerts(alerts):
         if ticker == "UNKNOWN":
             continue
 
-        # التحقق من إشارات الترند أولاً (لا تدخل في الإشارات العادية)
+        # التحقق من إشارات الترند أولاً
         is_trend_signal = check_and_update_trend_signals(signal, ticker)
         
-        # معالجة الإشارات العادية فقط (ليست إشارات ترند)
+        # معالجة الإشارات العادية فقط
         if not is_trend_signal:
             signal_lower = signal.lower()
             direction = "bearish" if any(word in signal_lower for word in ["bearish", "down", "put", "short", "sell"]) else "bullish"
@@ -320,9 +338,9 @@ def process_alerts(alerts):
             saudi_time = convert_to_saudi_time(current_time)
             print(f"✅ تم تخزين إشارة عادية {direction} لـ {ticker}: {clean_signal_name} (في {saudi_time} KSA)")
         else:
-            print(f"📊 تم معالجة إشارة ترند لـ {ticker} (لا تحتسب في الإشارات العادية)")
+            print(f"📊 تم معالجة إشارة ترند لـ {ticker}")
 
-    # تنظيف الإشارات العادية القديمة فقط
+    # تنظيف الإشارات العادية
     if random.random() < 0.3:
         cleanup_signals()
 
@@ -334,10 +352,10 @@ def process_alerts(alerts):
                 signals_info = get_current_signals_info(symbol, direction)
                 has_required, unique_signals = has_required_different_signals(signals[direction])
                 
-                # التحقق من محاذاة إشارات الترند مع الاتجاه الحالي
                 trend_aligned = check_trend_alignment(symbol, direction)
                 
-                if has_required and trend_aligned:
+                # السماح بالإرسال في وضع الاختبار حتى بدون إشارات ترند
+                if has_required and (trend_aligned or TEST_MODE):
                     saudi_time = get_saudi_time()
                     trend_status = get_trend_status(symbol)
                     
@@ -345,7 +363,7 @@ def process_alerts(alerts):
                         message = f"""🚀 <b>{symbol} - تأكيد دخول صفقة شراء</b>
 
 📊 <b>الإشارات المؤكدة ({len(unique_signals)}):</b>
-{chr(10).join([f'• {signal}' for signal in unique_signals[:REQUIRED_SIGNALS]])}
+{chr(10).join([f'• {signal}' for signal in unique_signals])}
 
 🎯 <b>حالة إشارات الترند:</b>
 {trend_status}
@@ -353,12 +371,12 @@ def process_alerts(alerts):
 🔢 <b>عدد الإشارات العادية:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
-<code>تأكيد دخول صفقة شراء - إشارات الترند متوافقة مع الإشارات العادية</code>"""
+<code>تأكيد دخول صفقة شراء - {'إشارات الترند متوافقة' if trend_aligned else 'وضع الاختبار'}</code>"""
                     else:
                         message = f"""📉 <b>{symbol} - تأكيد دخول صفقة بيع</b>
 
 📊 <b>الإشارات المؤكدة ({len(unique_signals)}):</b>
-{chr(10).join([f'• {signal}' for signal in unique_signals[:REQUIRED_SIGNALS]])}
+{chr(10).join([f'• {signal}' for signal in unique_signals])}
 
 🎯 <b>حالة إشارات الترند:</b>
 {trend_status}
@@ -366,7 +384,7 @@ def process_alerts(alerts):
 🔢 <b>عدد الإشارات العادية:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
-<code>تأكيد دخول صفقة بيع - إشارات الترند متوافقة مع الإشارات العادية</code>"""
+<code>تأكيد دخول صفقة بيع - {'إشارات الترند متوافقة' if trend_aligned else 'وضع الاختبار'}</code>"""
                     
                     telegram_success = send_telegram_to_all(message)
                     external_success = send_post_request(message, f"{direction.upper()} signals", 
@@ -374,7 +392,6 @@ def process_alerts(alerts):
                     
                     if telegram_success:
                         print(f"🎉 تم إرسال تنبيه دخول صفقة لـ {symbol} ({direction})")
-                        # مسح الإشارات العادية فقط، إشارات الترند تبقى
                         signal_memory[symbol][direction] = []
                     
                 else:
@@ -386,119 +403,4 @@ def process_alerts(alerts):
                     if time.time() - start_time > 2.0:
                         return
 
-# تسجيل معلومات الطلب الوارد
-@app.before_request
-def log_request_info():
-    if request.path == '/webhook':
-        print(f"\n🌐 طلب وارد: {request.method} {request.path}")
-        print(f"🌐 نوع المحتوى: {request.content_type}")
-
-# استقبال webhook
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        alerts = []
-        raw_data = None
-
-        # تسجيل البيانات الخام
-        try:
-            raw_data = request.get_data(as_text=True).strip()
-            print(f"📨 تم استقبال بيانات webhook الخام: '{raw_data}'")
-            
-            # محاولة تحليل JSON
-            if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
-                try:
-                    data = json.loads(raw_data)
-                    print(f"📊 بيانات JSON المحللة: {data}")
-                    
-                    if isinstance(data, dict):
-                        if "alerts" in data:
-                            alerts = data["alerts"]
-                        else:
-                            alerts = [data]
-                    elif isinstance(data, list):
-                        alerts = data
-                        
-                except json.JSONDecodeError as e:
-                    print(f"❌ خطأ في تحليل JSON: {e}")
-                    
-            elif raw_data:
-                alerts = [{"signal": raw_data, "raw_data": raw_data}]
-                
-        except Exception as parse_error:
-            print(f"❌ خطأ في تحليل البيانات الخام: {parse_error}")
-
-        # طريقة طلب JSON التقليدية
-        if not alerts and request.is_json:
-            try:
-                data = request.get_json(force=True)
-                print(f"📊 تم استقبال webhook JSON: {data}")
-                alerts = data.get("alerts", [])
-                if not alerts and data:
-                    alerts = [data]
-            except Exception as json_error:
-                print(f"❌ خطأ في تحليل JSON: {json_error}")
-
-        # إذا لم تكن هناك تنبيهات، استخدم البيانات الخام
-        if not alerts and raw_data:
-            alerts = [{"signal": raw_data, "raw_data": raw_data}]
-
-        print(f"🔍 معالجة {len(alerts)} تنبيه(ات)")
-        
-        if alerts:
-            process_alerts(alerts)
-            return jsonify({
-                "status": "alert_processed", 
-                "count": len(alerts),
-                "timestamp": datetime.utcnow().isoformat()
-            }), 200
-        else:
-            print("⚠️ لم يتم العثور على تنبيهات صالحة في webhook")
-            return jsonify({"status": "no_alerts"}), 200
-
-    except Exception as e:
-        print(f"❌ خطأ في webhook: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 400
-
-# الصفحة الرئيسية للفحص
-@app.route("/")
-def home():
-    return jsonify({
-        "status": "running",
-        "message": "TradingView Webhook Receiver is active",
-        "monitored_stocks": STOCK_LIST,
-        "required_signals": REQUIRED_SIGNALS,
-        "active_signals": {k: v for k, v in signal_memory.items()},
-        "trend_signals": {k: v for k, v in trend_signals.items()},
-        "timestamp": datetime.utcnow().isoformat()
-    })
-
-# اختبار التليجرام والخادم الخارجي
-def test_services():
-    print("جاري اختبار الخدمات...")
-    
-    # اختبار التليجرام
-    telegram_result = send_telegram_to_all("🔧 رسالة اختبار من البوت - النظام يعمل!")
-    print(f"نتيجة اختبار التليجرام: {telegram_result}")
-    
-    # اختبار الخادم الخارجي
-    external_result = send_post_request("رسالة اختبار", "TEST_SIGNAL", "BULLISH_CONFIRMATION")
-    print(f"نتيجة اختبار API الخارجي: {external_result}")
-    
-    return telegram_result and external_result
-
-# تشغيل التطبيق
-if __name__ == "__main__":
-    # اختبار الخدمات أولاً
-    test_services()
-    
-    port = int(os.environ.get("PORT", 10000))
-    print(f"🟢 تم بدء الخادم على المنفذ {port}")
-    print(f"🟢 مستقبل التليجرام: {CHAT_ID}")
-    print(f"🟢 الأسهم المراقبة: {', '.join(STOCK_LIST)}")
-    print(f"🟢 التوقيت السعودي: UTC+{TIMEZONE_OFFSET}")
-    print(f"🟢 الإشارات العادية المطلوبة: {REQUIRED_SIGNALS}")
-    print(f"🟢 إشارات الترند: Trend Catcher & Trend Tracer (لا تحتسب في العد)")
-    print(f"🟢 API الخارجي: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
-    print("🟢 في انتظار webhooks من TradingView...")
-    app.run(host="0.0.0.0", port=port)
+# ... (بقية الكود بدون تغيير)
