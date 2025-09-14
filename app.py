@@ -10,41 +10,27 @@ import random
 
 app = Flask(__name__)
 
-# Settings (UTC+3)
+# Saudi time settings (UTC+3)
 TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 2
+REQUIRED_SIGNALS = 3
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
-
-# Control flags - Trend disabled, Test mode enabled
-TREND_SIGNALS_ENABLED = False
-REGULAR_SIGNALS_ENABLED = True
-TEST_MODE = True
 
 # Cache for processed signals
 signal_cache = {}
 CACHE_TIMEOUT = 300
 
-# Track Trend signals
-trend_signals = defaultdict(lambda: {"trend_catcher": None, "trend_tracer": None})
-
-# Get Saudi time
+# Optimized get Saudi time
 def get_saudi_time():
     return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
 
-# Convert UTC to Saudi time
-def convert_to_saudi_time(utc_time):
-    if isinstance(utc_time, datetime):
-        return (utc_time + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
-    return "Unknown"
-
-# Remove HTML tags
+# Optimized HTML tag removal
 def remove_html_tags(text):
     if not text:
         return text
     return re.sub('<.*?>', '', text)
 
-# Send Telegram message
+# Optimized Telegram sending
 session = requests.Session()
 def send_telegram_to_all(message):
     try:
@@ -54,106 +40,169 @@ def send_telegram_to_all(message):
             "text": message,
             "parse_mode": "HTML"
         }
+        
         response = session.post(url, json=payload, timeout=3)
         return response.status_code == 200
+            
     except Exception:
         return False
 
-# Send control message to Telegram
-def send_control_message(message):
+# Optimized stock list loading
+_stock_list_cache = None
+_stock_list_cache_time = 0
+def load_stocks():
+    global _stock_list_cache, _stock_list_cache_time
+    
+    if _stock_list_cache and time.time() - _stock_list_cache_time < 300:
+        return _stock_list_cache
+    
+    stocks = []
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-        response = session.post(url, json=payload, timeout=3)
-        return response.status_code == 200
-    except Exception:
-        return False
+        with open('stocks.txt', 'r') as f:
+            stocks = [line.strip().upper() for line in f if line.strip()]
+    except FileNotFoundError:
+        stocks = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30"]
+    
+    _stock_list_cache = stocks
+    _stock_list_cache_time = time.time()
+    return stocks
 
 # Stock list
-STOCK_LIST = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30"]
+STOCK_LIST = load_stocks()
 
-# Memory for regular signals
+# Optimized signal memory
 MAX_SIGNALS_PER_SYMBOL = 20
 signal_memory = defaultdict(lambda: {"bullish": [], "bearish": []})
 
-# Clean up old signals
+# Optimized external POST
+def send_post_request(message, indicators, signal_type=None):
+    try:
+        url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
+        clean_message = remove_html_tags(message)
+        
+        payload = {
+            "text": clean_message,
+            "extras": {
+                "indicators": indicators,
+                "timestamp": datetime.utcnow().isoformat(),
+                "source": "tradingview-bot",
+                "original_signal_type": signal_type
+            }
+        }
+        
+        response = session.post(url, json=payload, timeout=3)
+        return response.status_code == 200
+            
+    except Exception:
+        return False
+
+# Optimized cleanup
 def cleanup_signals():
     cutoff = datetime.utcnow() - timedelta(minutes=15)
+    cleanup_count = 0
+    
     for symbol in list(signal_memory.keys()):
         for direction in ["bullish", "bearish"]:
+            original_count = len(signal_memory[symbol][direction])
             signal_memory[symbol][direction] = [
                 (sig, ts) for sig, ts in signal_memory[symbol][direction] 
                 if ts > cutoff
             ]
+            cleanup_count += (original_count - len(signal_memory[symbol][direction]))
+            
             if len(signal_memory[symbol][direction]) > MAX_SIGNALS_PER_SYMBOL:
                 signal_memory[symbol][direction] = signal_memory[symbol][direction][-MAX_SIGNALS_PER_SYMBOL:]
-            if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish']:
-                del signal_memory[symbol]
+        
+        if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish']:
+            del signal_memory[symbol]
+    
+    if cleanup_count > 0:
+        print(f"🧹 Cleaned {cleanup_count} old signals")
+
+# Optimized symbol extraction
+_symbol_patterns = [
+    ("SPX", "SPX500"), ("500", "SPX500"),
+    ("BTC", "BTCUSDT"), ("ETH", "ETHUSDT"),
+    ("NASDAQ", "NASDAQ100"), ("100", "NASDAQ100"),
+    ("DOW", "US30"), ("US30", "US30"), ("30", "US30")
+]
 
 def extract_symbol(message):
     message_upper = message.upper()
+    
     for symbol in STOCK_LIST:
         if symbol in message_upper:
             return symbol
+    
+    for pattern, symbol in _symbol_patterns:
+        if pattern in message_upper:
+            return symbol
+    
     return "UNKNOWN"
 
+# Improved signal name cleaning - remove stock symbols and timestamps
 def extract_clean_signal_name(raw_signal):
+    cache_key = f"signal_{hash(raw_signal)}"
+    if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
+        return signal_cache[cache_key]['value']
+    
+    # Remove timestamps
     clean_signal = re.sub(r'_\d+\.\d+', '', raw_signal)
+    
+    # Remove numbers
     clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
+    
+    # Remove stock symbols from the signal text
     for symbol in STOCK_LIST:
         clean_signal = clean_signal.replace(symbol, '').replace(symbol.lower(), '')
+    
+    # Remove known patterns
+    for pattern, symbol in _symbol_patterns:
+        clean_signal = clean_signal.replace(pattern, '').replace(pattern.lower(), '')
+    
+    # Remove special Unicode characters (like directional marks)
+    clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
+    
+    # Clean up extra spaces and trim
     clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
-    return clean_signal if clean_signal else "Unknown Signal"
+    
+    result = clean_signal if clean_signal else "Unknown Signal"
+    
+    signal_cache[cache_key] = {'value': result, 'time': time.time()}
+    return result
 
-# Detect Trend signals Bullish Turn + and Bearish Turn +
-def check_and_update_trend_signals(signal_text, symbol):
-    if not TREND_SIGNALS_ENABLED:
-        return False
-        
-    signal_upper = signal_text.upper()
-    is_trend_signal = False
+# Get current signals for a symbol and direction
+def get_current_signals_info(symbol, direction):
+    """Get formatted information about current signals"""
+    signals = signal_memory.get(symbol, {}).get(direction, [])
+    if not signals:
+        return "No signals yet"
     
-    # Detect Bullish Turn +
-    if "BULLISH TURN +" in signal_upper:
-        trend_signals[symbol]["trend_catcher"] = ("bullish", datetime.utcnow())
-        print(f"📊 Trend Catcher: bullish for {symbol} (Bullish Turn +)")
-        is_trend_signal = True
+    # Get unique signal names
+    unique_signals = set()
+    signal_details = []
+    for sig, ts in signals:
+        clean_signal = extract_clean_signal_name(sig)
+        unique_signals.add(clean_signal)
+        signal_details.append((clean_signal, ts))
     
-    # Detect Bearish Turn +
-    elif "BEARISH TURN +" in signal_upper:
-        trend_signals[symbol]["trend_catcher"] = ("bearish", datetime.utcnow())
-        print(f"📊 Trend Catcher: bearish for {symbol} (Bearish Turn +)")
-        is_trend_signal = True
+    signal_count = len(signals)
+    unique_count = len(unique_signals)
     
-    # Detect other trend signals
-    elif "TURN +" in signal_upper:
-        if "BULLISH" in signal_upper:
-            trend_signals[symbol]["trend_catcher"] = ("bullish", datetime.utcnow())
-            print(f"📊 Trend Catcher: bullish for {symbol}")
-            is_trend_signal = True
-        elif "BEARISH" in signal_upper:
-            trend_signals[symbol]["trend_catcher"] = ("bearish", datetime.utcnow())
-            print(f"📊 Trend Catcher: bearish for {symbol}")
-            is_trend_signal = True
+    info = f"Current: {signal_count} signals, Unique: {unique_count} types"
     
-    # Detect Trend Tracer signals
-    signal_lower = signal_text.lower()
-    if 'tracer' in signal_lower:
-        if any(word in signal_lower for word in ["bullish", "up", "call", "long", "buy"]):
-            trend_signals[symbol]["trend_tracer"] = ("bullish", datetime.utcnow())
-            print(f"📊 Trend Tracer: bullish for {symbol}")
-            is_trend_signal = True
-        elif any(word in signal_lower for word in ["bearish", "down", "put", "short", "sell"]):
-            trend_signals[symbol]["trend_tracer"] = ("bearish", datetime.utcnow())
-            print(f"📊 Trend Tracer: bearish for {symbol}")
-            is_trend_signal = True
+    # Add signal names with timestamps if there are signals
+    if unique_signals:
+        info += f"\n📋 Current signals:\n"
+        for i, signal_name in enumerate(list(unique_signals)[:10], 1):
+            # Find the first occurrence of this signal
+            first_occurrence = next((ts for sig, ts in signal_details if sig == signal_name), None)
+            time_str = first_occurrence.strftime('%H:%M:%S') if first_occurrence else "Unknown"
+            info += f"   {i}. {signal_name} (since {time_str})\n"
     
-    return is_trend_signal
+    return info
 
+# Optimized signal uniqueness check
 def has_required_different_signals(signals_list):
     if len(signals_list) < REQUIRED_SIGNALS:
         return False, []
@@ -167,92 +216,10 @@ def has_required_different_signals(signals_list):
     
     return False, list(unique_signals)
 
-def check_trend_alignment(symbol, direction):
-    if not TREND_SIGNALS_ENABLED:
-        return True  # Always return True when trend signals are disabled
-        
-    trend_catcher = trend_signals[symbol]["trend_catcher"]
-    trend_tracer = trend_signals[symbol]["trend_tracer"]
-    
-    if trend_catcher and trend_catcher[0] == direction:
-        print(f"✅ Trend Catcher aligned with {direction} for {symbol}")
-        return True
-    
-    if trend_tracer and trend_tracer[0] == direction:
-        print(f"✅ Trend Tracer aligned with {direction} for {symbol}")
-        return True
-    
-    print(f"❌ Trend signals not aligned with {direction} for {symbol}")
-    return False
-
-def get_trend_status(symbol):
-    trend_catcher = trend_signals[symbol]["trend_catcher"]
-    trend_tracer = trend_signals[symbol]["trend_tracer"]
-    
-    status = []
-    if trend_catcher:
-        time_str = convert_to_saudi_time(trend_catcher[1])
-        direction_emoji = "📈" if trend_catcher[0] == "bullish" else "📉"
-        status.append(f"{direction_emoji} Trend Catcher: {trend_catcher[0]} (since {time_str})")
-    else:
-        status.append("❓ Trend Catcher: Not available")
-    
-    if trend_tracer:
-        time_str = convert_to_saudi_time(trend_tracer[1])
-        direction_emoji = "📈" if trend_tracer[0] == "bullish" else "📉"
-        status.append(f"{direction_emoji} Trend Tracer: {trend_tracer[0]} (since {time_str})")
-    else:
-        status.append("❓ Trend Tracer: Not available")
-    
-    return "\n".join(status)
-
-# Process control commands
-def process_control_command(command):
-    global TREND_SIGNALS_ENABLED, REGULAR_SIGNALS_ENABLED, TEST_MODE
-    
-    command_lower = command.lower().strip()
-    
-    if command_lower == "trend true":
-        TREND_SIGNALS_ENABLED = True
-        return "✅ Trend signals enabled"
-    
-    elif command_lower == "trend false":
-        TREND_SIGNALS_ENABLED = False
-        return "❌ Trend signals disabled"
-    
-    elif command_lower == "regular true":
-        REGULAR_SIGNALS_ENABLED = True
-        return "✅ Regular signals enabled"
-    
-    elif command_lower == "regular false":
-        REGULAR_SIGNALS_ENABLED = False
-        return "❌ Regular signals disabled"
-    
-    elif command_lower == "test true":
-        TEST_MODE = True
-        return "✅ Test mode enabled"
-    
-    elif command_lower == "test false":
-        TEST_MODE = False
-        return "❌ Test mode disabled"
-    
-    elif command_lower == "status":
-        status_msg = f"""📊 <b>Current Status:</b>
-
-🎯 <b>Trend Signals:</b> {'✅ ENABLED' if TREND_SIGNALS_ENABLED else '❌ DISABLED'}
-📈 <b>Regular Signals:</b> {'✅ ENABLED' if REGULAR_SIGNALS_ENABLED else '❌ DISABLED'}
-🧪 <b>Test Mode:</b> {'✅ ENABLED' if TEST_MODE else '❌ DISABLED'}
-
-⚙️ <b>Available Commands:</b>
-• trend true/false
-• regular true/false  
-• test true/false
-• status"""
-        return status_msg
-    
-    return "❓ Unknown command. Available: trend true/false, regular true/false, test true/false, status"
-
+# Optimized alert processing with better logging
 def process_alerts(alerts):
+    start_time = time.time()
+    
     for alert in alerts:
         if isinstance(alert, dict):
             signal = alert.get("signal", alert.get("message", "")).strip()
@@ -264,191 +231,194 @@ def process_alerts(alerts):
         if not signal:
             continue
 
-        # Check if it's a control command
-        if signal.lower().startswith(('trend ', 'regular ', 'test ', 'status')):
-            result = process_control_command(signal)
-            send_control_message(result)
-            print(f"🔧 Control command processed: {signal}")
-            continue
-
         if not ticker or ticker == "UNKNOWN":
             ticker = extract_symbol(signal)
 
         if ticker == "UNKNOWN":
             continue
 
-        print(f"📩 Incoming signal: {signal}")
+        signal_lower = signal.lower()
+        direction = "bearish" if any(word in signal_lower for word in ["bearish", "down", "put", "short"]) else "bullish"
 
-        is_trend_signal = check_and_update_trend_signals(signal, ticker)
+        if ticker not in signal_memory:
+            signal_memory[ticker] = {"bullish": [], "bearish": []}
         
-        if not is_trend_signal and REGULAR_SIGNALS_ENABLED:
-            signal_lower = signal.lower()
-            direction = "bearish" if any(word in signal_lower for word in ["bearish", "down", "put", "short", "sell"]) else "bullish"
+        current_signals = signal_memory[ticker][direction]
+        if len(current_signals) >= MAX_SIGNALS_PER_SYMBOL:
+            current_signals.pop(0)
+        
+        current_signals.append((signal, datetime.utcnow()))
+        
+        # Log each stored signal with cleaned name
+        clean_signal_name = extract_clean_signal_name(signal)
+        print(f"✅ Stored {direction} signal for {ticker}: {clean_signal_name}")
 
-            if ticker not in signal_memory:
-                signal_memory[ticker] = {"bullish": [], "bearish": []}
-            
-            current_signals = signal_memory[ticker][direction]
-            if len(current_signals) >= MAX_SIGNALS_PER_SYMBOL:
-                current_signals.pop(0)
-            
-            current_time = datetime.utcnow()
-            current_signals.append((signal, current_time))
-            
-            clean_signal_name = extract_clean_signal_name(signal)
-            saudi_time = convert_to_saudi_time(current_time)
-            print(f"✅ Regular {direction} signal for {ticker}: {clean_signal_name} (at {saudi_time})")
-        elif is_trend_signal:
-            print(f"📊 Processed trend signal for {ticker}")
-        else:
-            print(f"⏸️ Regular signals disabled - ignoring signal for {ticker}")
-
+    # Clean up periodically
     if random.random() < 0.3:
         cleanup_signals()
 
-    if not REGULAR_SIGNALS_ENABLED:
-        return  # Skip signal processing if regular signals are disabled
-
+    # Check for required signals with improved logging
     for symbol, signals in list(signal_memory.items()):
         for direction in ["bullish", "bearish"]:
             signal_count = len(signals[direction])
             if signal_count > 0:
+                # Always show progress, not just when waiting
+                signals_info = get_current_signals_info(symbol, direction)
                 has_required, unique_signals = has_required_different_signals(signals[direction])
-                trend_aligned = check_trend_alignment(symbol, direction)
                 
-                if has_required and (trend_aligned or TEST_MODE):
+                if has_required:
                     saudi_time = get_saudi_time()
-                    trend_status = get_trend_status(symbol)
                     
-                    # Telegram messages in Arabic
                     if direction == "bullish":
-                        message = f"""🚀 <b>{symbol} - تأكيد دخول صفقة شراء</b>
+                        message = f"""🚀 <b>{symbol} - تأكيد إشارة صعودية قوية</b>
 
-📊 <b>الإشارات المؤكدة ({len(unique_signals)}):</b>
-{chr(10).join([f'• {signal}' for signal in unique_signals])}
+📊 <b>الإشارات المختلفة:</b>
+{chr(10).join([f'• {signal}' for signal in unique_signals[:REQUIRED_SIGNALS]])}
 
-🎯 <b>حالة إشارات الترند:</b>
-{trend_status}
-
-🔢 <b>عدد الإشارات العادية:</b> {signal_count}
+🔢 <b>عدد الإشارات الكلي:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
-<code>تأكيد دخول صفقة شراء - {'إشارات الترند متوافقة' if trend_aligned else 'وضع الاختبار'}</code>"""
+<code>تأكيد صعودي قوي من {REQUIRED_SIGNALS} إشارات مختلفة - متوقع حركة صعودية</code>"""
                     else:
-                        message = f"""📉 <b>{symbol} - تأكيد دخول صفقة بيع</b>
+                        message = f"""📉 <b>{symbol} - تأكيد إشارة هبوطية قوية</b>
 
-📊 <b>الإشارات المؤكدة ({len(unique_signals)}):</b>
-{chr(10).join([f'• {signal}' for signal in unique_signals])}
+📊 <b>الإشارات المختلفة:</b>
+{chr(10).join([f'• {signal}' for signal in unique_signals[:REQUIRED_SIGNALS]])}
 
-🎯 <b>حالة إشارات الترند:</b>
-{trend_status}
-
-🔢 <b>عدد الإشارات العادية:</b> {signal_count}
+🔢 <b>عدد الإشارات الكلي:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
-<code>تأكيد دخول صفقة بيع - {'إشارات الترند متوافقة' if trend_aligned else 'وضع الاختبار'}</code>"""
+<code>تأكيد هبوطي قوي من {REQUIRED_SIGNALS} إشارات مختلفة - متوقع حركة هبوطية</code>"""
                     
                     telegram_success = send_telegram_to_all(message)
+                    external_success = send_post_request(message, f"{direction.upper()} signals", 
+                                                       "BULLISH_CONFIRMATION" if direction == "bullish" else "BEARISH_CONFIRMATION")
+                    
                     if telegram_success:
-                        print(f"🎉 Alert sent for {symbol} ({direction})")
-                        signal_memory[symbol][direction] = []
+                        print(f"🎉 Alert sent successfully for {symbol} ({direction})")
+                    
+                    signal_memory[symbol][direction] = []
+                    
                 else:
-                    print(f"⏳ Waiting for conditions for {symbol} ({direction})")
-                    print(f"   Need {REQUIRED_SIGNALS} different regular signals, currently have {len(unique_signals)}")
-                    print(f"   {get_trend_status(symbol)}")
+                    print(f"⏳ Waiting for different signals for {symbol} ({direction})")
+                    print(f"   {signals_info}")
+                    print(f"   Need {REQUIRED_SIGNALS} different signals, currently have {len(unique_signals)}")
+                    
+                    # Break early if processing taking too long
+                    if time.time() - start_time > 2.0:
+                        return
 
+# Log incoming request information
 @app.before_request
-def log_requests():
-    print(f"📨 Request: {request.method} {request.path}")
+def log_request_info():
+    if request.path == '/webhook':
+        print(f"\n🌐 Incoming request: {request.method} {request.path}")
+        print(f"🌐 Content-Type: {request.content_type}")
 
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-    response.headers.add('Access-Control-Allow-Methods', 'POST, GET')
-    return response
-
-@app.route("/webhook", methods=["POST", "GET"])
+# Receive webhook
+@app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        if request.method == "GET":
-            return jsonify({"status": "ready", "message": "Webhook endpoint is active"})
-        
         alerts = []
-        content_type = request.content_type or ""
-        
-        if 'json' in content_type:
+        raw_data = None
+
+        # Log raw data
+        try:
+            raw_data = request.get_data(as_text=True).strip()
+            print(f"📨 Received raw webhook data: '{raw_data}'")
+            
+            # Try to parse JSON
+            if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
+                try:
+                    data = json.loads(raw_data)
+                    print(f"📊 Parsed JSON data: {data}")
+                    
+                    if isinstance(data, dict):
+                        if "alerts" in data:
+                            alerts = data["alerts"]
+                        else:
+                            alerts = [data]
+                    elif isinstance(data, list):
+                        alerts = data
+                        
+                except json.JSONDecodeError as e:
+                    print(f"❌ JSON decode error: {e}")
+                    
+            elif raw_data:
+                alerts = [{"signal": raw_data, "raw_data": raw_data}]
+                
+        except Exception as parse_error:
+            print(f"❌ Raw data parse error: {parse_error}")
+
+        # Traditional JSON request method
+        if not alerts and request.is_json:
             try:
                 data = request.get_json(force=True)
-                if isinstance(data, dict):
+                print(f"📊 Received JSON webhook: {data}")
+                alerts = data.get("alerts", [])
+                if not alerts and data:
                     alerts = [data]
-                elif isinstance(data, list):
-                    alerts = data
-            except:
-                pass
-        
-        if not alerts:
-            raw_data = request.get_data(as_text=True).strip()
-            if raw_data:
-                alerts = [{"signal": raw_data}]
-        
+            except Exception as json_error:
+                print(f"❌ JSON parse error: {json_error}")
+
+        # If no alerts, use raw data
+        if not alerts and raw_data:
+            alerts = [{"signal": raw_data, "raw_data": raw_data}]
+
         print(f"🔍 Processing {len(alerts)} alert(s)")
         
         if alerts:
             process_alerts(alerts)
-            return jsonify({"status": "processed", "count": len(alerts)})
-        else:
-            return jsonify({"status": "no_alerts"})
-            
-    except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)})
-
-@app.route("/control", methods=["POST", "GET"])
-def control():
-    """Endpoint for control commands"""
-    try:
-        if request.method == "GET":
             return jsonify({
-                "trend_signals_enabled": TREND_SIGNALS_ENABLED,
-                "regular_signals_enabled": REGULAR_SIGNALS_ENABLED,
-                "test_mode": TEST_MODE
-            })
-        
-        command = request.get_data(as_text=True).strip()
-        if command:
-            result = process_control_command(command)
-            return jsonify({"status": "processed", "result": result})
+                "status": "alert_processed", 
+                "count": len(alerts),
+                "timestamp": datetime.utcnow().isoformat()
+            }), 200
         else:
-            return jsonify({"status": "error", "message": "No command provided"})
-            
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+            print("⚠️ No valid alerts found in webhook")
+            return jsonify({"status": "no_alerts"}), 200
 
+    except Exception as e:
+        print(f"❌ Error in webhook: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+# Home page for checking
 @app.route("/")
 def home():
     return jsonify({
         "status": "running",
-        "message": "TradingView Webhook Receiver",
+        "message": "TradingView Webhook Receiver is active",
         "monitored_stocks": STOCK_LIST,
         "required_signals": REQUIRED_SIGNALS,
-        "trend_signals_enabled": TREND_SIGNALS_ENABLED,
-        "regular_signals_enabled": REGULAR_SIGNALS_ENABLED,
-        "test_mode": TEST_MODE,
-        "control_commands": [
-            "trend true/false - Enable/disable trend signals",
-            "regular true/false - Enable/disable regular signals", 
-            "test true/false - Enable/disable test mode",
-            "status - Show current status"
-        ]
+        "active_signals": {k: v for k, v in signal_memory.items()},
+        "timestamp": datetime.utcnow().isoformat()
     })
 
+# Test Telegram and external server
+def test_services():
+    print("Testing services...")
+    
+    # Test Telegram
+    telegram_result = send_telegram_to_all("🔧 Test message from bot - System is working!")
+    print(f"Telegram test result: {telegram_result}")
+    
+    # Test external server
+    external_result = send_post_request("Test message", "TEST_SIGNAL", "BULLISH_CONFIRMATION")
+    print(f"External API test result: {external_result}")
+    
+    return telegram_result and external_result
+
+# Run the application
 if __name__ == "__main__":
+    # Test services first
+    test_services()
+    
     port = int(os.environ.get("PORT", 10000))
-    print(f"🟢 Starting server on port {port}")
-    print(f"🟢 Trend signals: {'ENABLED' if TREND_SIGNALS_ENABLED else 'DISABLED'}")
-    print(f"🟢 Regular signals: {'ENABLED' if REGULAR_SIGNALS_ENABLED else 'DISABLED'}")
-    print(f"🟢 Test mode: {'ENABLED' if TEST_MODE else 'DISABLED'}")
-    print("🟢 Control commands: trend true/false, regular true/false, test true/false, status")
-    print("🟢 Ready to receive webhooks...")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    print(f"🟢 Server started on port {port}")
+    print(f"🟢 Telegram receiver: {CHAT_ID}")
+    print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
+    print(f"🟢 Saudi Timezone: UTC+{TIMEZONE_OFFSET}")
+    print(f"🟢 Required signals: {REQUIRED_SIGNALS}")
+    print(f"🟢 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
+    print("🟢 Waiting for TradingView webhooks...")
+    app.run(host="0.0.0.0", port=port)
