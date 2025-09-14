@@ -10,27 +10,27 @@ import random
 
 app = Flask(__name__)
 
-# Saudi time settings (UTC+3)
+# إعدادات التوقيت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3
 REQUIRED_SIGNALS = 1
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# Cache for processed signals
+# ذاكرة مؤقتة للإشارات المعالجة
 signal_cache = {}
 CACHE_TIMEOUT = 300
 
-# Optimized get Saudi time
+# الحصول على التوقيت السعودي بشكل محسن
 def get_saudi_time():
     return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
 
-# Optimized HTML tag removal
+# إزالة علامات HTML بشكل محسن
 def remove_html_tags(text):
     if not text:
         return text
     return re.sub('<.*?>', '', text)
 
-# Optimized Telegram sending
+# إرسال التلغرام بشكل محسن
 session = requests.Session()
 def send_telegram_to_all(message):
     try:
@@ -47,7 +47,7 @@ def send_telegram_to_all(message):
     except Exception:
         return False
 
-# Optimized stock list loading
+# تحميل قائمة الأسهم بشكل محسن
 _stock_list_cache = None
 _stock_list_cache_time = 0
 def load_stocks():
@@ -67,14 +67,14 @@ def load_stocks():
     _stock_list_cache_time = time.time()
     return stocks
 
-# Stock list
+# قائمة الأسهم
 STOCK_LIST = load_stocks()
 
-# Optimized signal memory
+# ذاكرة الإشارات المحسنة
 MAX_SIGNALS_PER_SYMBOL = 20
 signal_memory = defaultdict(lambda: {"bullish": [], "bearish": []})
 
-# Optimized external POST
+# طلب POST الخارجي المحسن
 def send_post_request(message, indicators, signal_type=None):
     try:
         url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
@@ -96,7 +96,7 @@ def send_post_request(message, indicators, signal_type=None):
     except Exception:
         return False
 
-# Optimized cleanup
+# تنظيف الإشارات المحسن
 def cleanup_signals():
     cutoff = datetime.utcnow() - timedelta(minutes=15)
     cleanup_count = 0
@@ -117,9 +117,9 @@ def cleanup_signals():
             del signal_memory[symbol]
     
     if cleanup_count > 0:
-        print(f"🧹 Cleaned {cleanup_count} old signals")
+        print(f"🧹 تم تنظيف {cleanup_count} إشارة قديمة")
 
-# Optimized symbol extraction
+# استخراج الرمز بشكل محسن
 _symbol_patterns = [
     ("SPX", "SPX500"), ("500", "SPX500"),
     ("BTC", "BTCUSDT"), ("ETH", "ETHUSDT"),
@@ -140,45 +140,45 @@ def extract_symbol(message):
     
     return "UNKNOWN"
 
-# Improved signal name cleaning - remove stock symbols and timestamps
+# تحسين تنظيف اسم الإشارة - إزالة رموز الأسهم والطوابع الزمنية
 def extract_clean_signal_name(raw_signal):
     cache_key = f"signal_{hash(raw_signal)}"
     if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
         return signal_cache[cache_key]['value']
     
-    # Remove timestamps
+    # إزالة الطوابع الزمنية
     clean_signal = re.sub(r'_\d+\.\d+', '', raw_signal)
     
-    # Remove numbers
-    clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
+    # إزالة الأرقام
+    clean_signal = re.sub(r'\b\d+\b', '', raw_signal)
     
-    # Remove stock symbols from the signal text
+    # إزالة رموز الأسهم من نص الإشارة
     for symbol in STOCK_LIST:
         clean_signal = clean_signal.replace(symbol, '').replace(symbol.lower(), '')
     
-    # Remove known patterns
+    # إزالة الأنماط المعروفة
     for pattern, symbol in _symbol_patterns:
         clean_signal = clean_signal.replace(pattern, '').replace(pattern.lower(), '')
     
-    # Remove special Unicode characters (like directional marks)
+    # إزالة الأحرف Unicode الخاصة (مثل العلامات الاتجاهية)
     clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
     
-    # Clean up extra spaces and trim
+    # تنظيف المسافات الإضافية والتقليم
     clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
     
-    result = clean_signal if clean_signal else "Unknown Signal"
+    result = clean_signal if clean_signal else "إشارة غير معروفة"
     
     signal_cache[cache_key] = {'value': result, 'time': time.time()}
     return result
 
-# Get current signals for a symbol and direction
+# الحصول على الإشارات الحالية للرمز والاتجاه
 def get_current_signals_info(symbol, direction):
-    """Get formatted information about current signals"""
+    """الحصول على معلومات منسقة عن الإشارات الحالية"""
     signals = signal_memory.get(symbol, {}).get(direction, [])
     if not signals:
-        return "No signals yet"
+        return "لا توجد إشارات حتى الآن"
     
-    # Get unique signal names
+    # الحصول على أسماء الإشارات الفريدة
     unique_signals = set()
     signal_details = []
     for sig, ts in signals:
@@ -189,20 +189,20 @@ def get_current_signals_info(symbol, direction):
     signal_count = len(signals)
     unique_count = len(unique_signals)
     
-    info = f"Current: {signal_count} signals, Unique: {unique_count} types"
+    info = f"الحالية: {signal_count} إشارة، الفريدة: {unique_count} نوع"
     
-    # Add signal names with timestamps if there are signals
+    # إضافة أسماء الإشارات مع الطوابع الزمنية إذا كانت هناك إشارات
     if unique_signals:
-        info += f"\n📋 Current signals:\n"
+        info += f"\n📋 الإشارات الحالية:\n"
         for i, signal_name in enumerate(list(unique_signals)[:10], 1):
-            # Find the first occurrence of this signal
+            # العثور على أول occurrence لهذه الإشارة
             first_occurrence = next((ts for sig, ts in signal_details if sig == signal_name), None)
-            time_str = first_occurrence.strftime('%H:%M:%S') if first_occurrence else "Unknown"
-            info += f"   {i}. {signal_name} (since {time_str})\n"
+            time_str = first_occurrence.strftime('%H:%M:%S') if first_occurrence else "غير معروف"
+            info += f"   {i}. {signal_name} (منذ {time_str})\n"
     
     return info
 
-# Optimized signal uniqueness check
+# فحص تفرد الإشارة المحسن
 def has_required_different_signals(signals_list):
     if len(signals_list) < REQUIRED_SIGNALS:
         return False, []
@@ -216,7 +216,7 @@ def has_required_different_signals(signals_list):
     
     return False, list(unique_signals)
 
-# Optimized alert processing with better logging
+# معالجة التنبيهات المحسنة مع تسجيل محسن
 def process_alerts(alerts):
     start_time = time.time()
     
@@ -249,20 +249,20 @@ def process_alerts(alerts):
         
         current_signals.append((signal, datetime.utcnow()))
         
-        # Log each stored signal with cleaned name
+        # تسجيل كل إشارة مخزنة مع الاسم النظيف
         clean_signal_name = extract_clean_signal_name(signal)
-        print(f"✅ Stored {direction} signal for {ticker}: {clean_signal_name}")
+        print(f"✅ تم تخزين إشارة {direction} لـ {ticker}: {clean_signal_name}")
 
-    # Clean up periodically
+    # التنظيف الدوري
     if random.random() < 0.3:
         cleanup_signals()
 
-    # Check for required signals with improved logging
+    # التحقق من الإشارات المطلوبة مع تسجيل محسن
     for symbol, signals in list(signal_memory.items()):
         for direction in ["bullish", "bearish"]:
             signal_count = len(signals[direction])
             if signal_count > 0:
-                # Always show progress, not just when waiting
+                # دائمًا عرض التقدم، ليس فقط عند الانتظار
                 signals_info = get_current_signals_info(symbol, direction)
                 has_required, unique_signals = has_required_different_signals(signals[direction])
                 
@@ -295,43 +295,43 @@ def process_alerts(alerts):
                                                        "BULLISH_CONFIRMATION" if direction == "bullish" else "BEARISH_CONFIRMATION")
                     
                     if telegram_success:
-                        print(f"🎉 Alert sent successfully for {symbol} ({direction})")
+                        print(f"🎉 تم إرسال التنبيه بنجاح لـ {symbol} ({direction})")
                     
                     signal_memory[symbol][direction] = []
                     
                 else:
-                    print(f"⏳ Waiting for different signals for {symbol} ({direction})")
+                    print(f"⏳ في انتظار إشارات مختلفة لـ {symbol} ({direction})")
                     print(f"   {signals_info}")
-                    print(f"   Need {REQUIRED_SIGNALS} different signals, currently have {len(unique_signals)}")
+                    print(f"   تحتاج {REQUIRED_SIGNALS} إشارات مختلفة، حالياً لديك {len(unique_signals)}")
                     
-                    # Break early if processing taking too long
+                    # إنهاء مبكر إذا استغرقت المعالجة وقتًا طويلاً
                     if time.time() - start_time > 2.0:
                         return
 
-# Log incoming request information
+# تسجيل معلومات الطلب الوارد
 @app.before_request
 def log_request_info():
     if request.path == '/webhook':
-        print(f"\n🌐 Incoming request: {request.method} {request.path}")
-        print(f"🌐 Content-Type: {request.content_type}")
+        print(f"\n🌐 طلب وارد: {request.method} {request.path}")
+        print(f"🌐 نوع المحتوى: {request.content_type}")
 
-# Receive webhook
+# استقبال webhook
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
         alerts = []
         raw_data = None
 
-        # Log raw data
+        # تسجيل البيانات الخام
         try:
             raw_data = request.get_data(as_text=True).strip()
-            print(f"📨 Received raw webhook data: '{raw_data}'")
+            print(f"📨 تم استقبال بيانات webhook الخام: '{raw_data}'")
             
-            # Try to parse JSON
+            # محاولة تحليل JSON
             if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
                 try:
                     data = json.loads(raw_data)
-                    print(f"📊 Parsed JSON data: {data}")
+                    print(f"📊 بيانات JSON المحللة: {data}")
                     
                     if isinstance(data, dict):
                         if "alerts" in data:
@@ -342,30 +342,30 @@ def webhook():
                         alerts = data
                         
                 except json.JSONDecodeError as e:
-                    print(f"❌ JSON decode error: {e}")
+                    print(f"❌ خطأ في فك تشفير JSON: {e}")
                     
             elif raw_data:
                 alerts = [{"signal": raw_data, "raw_data": raw_data}]
                 
         except Exception as parse_error:
-            print(f"❌ Raw data parse error: {parse_error}")
+            print(f"❌ خطأ في تحليل البيانات الخام: {parse_error}")
 
-        # Traditional JSON request method
+        # طريقة طلب JSON التقليدية
         if not alerts and request.is_json:
             try:
                 data = request.get_json(force=True)
-                print(f"📊 Received JSON webhook: {data}")
+                print(f"📊 تم استقبال webhook JSON: {data}")
                 alerts = data.get("alerts", [])
                 if not alerts and data:
                     alerts = [data]
             except Exception as json_error:
-                print(f"❌ JSON parse error: {json_error}")
+                print(f"❌ خطأ في تحليل JSON: {json_error}")
 
-        # If no alerts, use raw data
+        # إذا لم تكن هناك تنبيهات، استخدم البيانات الخام
         if not alerts and raw_data:
             alerts = [{"signal": raw_data, "raw_data": raw_data}]
 
-        print(f"🔍 Processing {len(alerts)} alert(s)")
+        print(f"🔍 معالجة {len(alerts)} تنبيه(ات)")
         
         if alerts:
             process_alerts(alerts)
@@ -375,50 +375,50 @@ def webhook():
                 "timestamp": datetime.utcnow().isoformat()
             }), 200
         else:
-            print("⚠️ No valid alerts found in webhook")
+            print("⚠️ لم يتم العثور على تنبيهات صالحة في webhook")
             return jsonify({"status": "no_alerts"}), 200
 
     except Exception as e:
-        print(f"❌ Error in webhook: {str(e)}")
+        print(f"❌ خطأ في webhook: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 400
 
-# Home page for checking
+# الصفحة الرئيسية للفحص
 @app.route("/")
 def home():
     return jsonify({
         "status": "running",
-        "message": "TradingView Webhook Receiver is active",
+        "message": "مستقبل webhook الخاص بـ TradingView نشط",
         "monitored_stocks": STOCK_LIST,
         "required_signals": REQUIRED_SIGNALS,
         "active_signals": {k: v for k, v in signal_memory.items()},
         "timestamp": datetime.utcnow().isoformat()
     })
 
-# Test Telegram and external server
+# اختبار خدمة التلغرام والخادم الخارجي
 def test_services():
-    print("Testing services...")
+    print("جاري اختبار الخدمات...")
     
-    # Test Telegram
-    telegram_result = send_telegram_to_all("🔧 Test message from bot - System is working!")
-    print(f"Telegram test result: {telegram_result}")
+    # اختبار التلغرام
+    telegram_result = send_telegram_to_all("🔧 رسالة اختبار من البوت - النظام يعمل!")
+    print(f"نتيجة اختبار التلغرام: {telegram_result}")
     
-    # Test external server
-    external_result = send_post_request("Test message", "TEST_SIGNAL", "BULLISH_CONFIRMATION")
-    print(f"External API test result: {external_result}")
+    # اختبار الخادم الخارجي
+    external_result = send_post_request("رسالة اختبار", "TEST_SIGNAL", "BULLISH_CONFIRMATION")
+    print(f"نتيجة اختبار API الخارجي: {external_result}")
     
     return telegram_result and external_result
 
-# Run the application
+# تشغيل التطبيق
 if __name__ == "__main__":
-    # Test services first
+    # اختبار الخدمات أولاً
     test_services()
     
     port = int(os.environ.get("PORT", 10000))
-    print(f"🟢 Server started on port {port}")
-    print(f"🟢 Telegram receiver: {CHAT_ID}")
-    print(f"🟢 Monitoring stocks: {', '.join(STOCK_LIST)}")
-    print(f"🟢 Saudi Timezone: UTC+{TIMEZONE_OFFSET}")
-    print(f"🟢 Required signals: {REQUIRED_SIGNALS}")
-    print(f"🟢 External API: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
-    print("🟢 Waiting for TradingView webhooks...")
+    print(f"🟢 تم بدء الخادم على المنفذ {port}")
+    print(f"🟢 مستقبل التلغرام: {CHAT_ID}")
+    print(f"🟢 الأسهم الخاضعة للمراقبة: {', '.join(STOCK_LIST)}")
+    print(f"🟢 التوقيت السعودي: UTC+{TIMEZONE_OFFSET}")
+    print(f"🟢 الإشارات المطلوبة: {REQUIRED_SIGNALS}")
+    print(f"🟢 API الخارجي: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
+    print("🟢 في انتظار webhooks من TradingView...")
     app.run(host="0.0.0.0", port=port)
