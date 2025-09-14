@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # إعدادات التوقيت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 2
+REQUIRED_SIGNALS = 2  # تغيير من 3 إلى 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
@@ -187,7 +187,50 @@ def extract_symbol(message):
     print(f"   ⚠️  لم يتم العثور على أي رمز في الرسالة: {message_upper}")
     return "UNKNOWN"
 
-# تحسين تنظيف اسم الإشارة
+# حساب التشابه بين النصوص
+def calculate_similarity(str1, str2):
+    """حساب درجة التشابه بين نصين"""
+    if not str1 or not str2:
+        return 0
+    
+    str1 = str1.lower()
+    str2 = str2.lower()
+    
+    # طريقة بسيطة لحساب التشابه
+    words1 = set(str1.split())
+    words2 = set(str2.split())
+    
+    if not words1 or not words2:
+        return 0
+    
+    intersection = words1.intersection(words2)
+    union = words1.union(words2)
+    
+    return len(intersection) / len(union) if union else 0
+
+# التحقق من جودة الإشارة
+def is_quality_signal(signal_text):
+    """التحقق من جودة الإشارة"""
+    if not signal_text or len(signal_text.strip()) < 10:
+        return False
+    
+    # تخطي الإشارات العامة جداً
+    generic_phrases = [
+        "reversal", "signal", "alert", "indicator", 
+        "buy", "sell", "entry", "exit", "trade"
+    ]
+    
+    signal_lower = signal_text.lower()
+    generic_count = sum(1 for phrase in generic_phrases if phrase in signal_lower)
+    
+    # إذا كانت معظم الكلمات عامة، تخطي الإشارة
+    words = signal_lower.split()
+    if words and generic_count / len(words) > 0.5:
+        return False
+    
+    return True
+
+# تحسين تنظيف اسم الإشارة مع التصحيح الإملائي
 def extract_clean_signal_name(raw_signal):
     if not raw_signal or len(raw_signal.strip()) < 2:
         return "إشارة غير واضحة"
@@ -196,22 +239,39 @@ def extract_clean_signal_name(raw_signal):
     if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
         return signal_cache[cache_key]['value']
     
-    # أولاً، إزالة أي رموز أسهم معروفة
+    # التصحيح الإملائي التلقائي
+    corrections = {
+        "REERSAL": "REVERSAL",
+        "OERBOUGHT": "OVERBOUGHT", 
+        "WAE": "WAVE",
+        "DOWNWARD": "DOWNWARD",
+        "UPWARD": "UPWARD",
+        "BULLISH": "BULLISH",
+        "BEARISH": "BEARISH",
+        "OSCILLATOR": "OSCILLATOR",
+        "INDICATOR": "INDICATOR"
+    }
+    
     clean_signal = raw_signal.upper()
+    
+    # تطبيق التصحيحات الإملائية
+    for wrong, correct in corrections.items():
+        clean_signal = clean_signal.replace(wrong, correct)
+    
+    # إزالة الرموز والأرقام
     for symbol in STOCK_LIST:
         clean_signal = clean_signal.replace(symbol, '')
     
-    # إزالة الطوابع الزمنية
     clean_signal = re.sub(r'_\d+\.\d+', '', clean_signal)
-    
-    # إزالة الأرقام
     clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
-    
-    # إزالة الأحرف Unicode الخاصة
     clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
-    
-    # تنظيف المسافات الإضافية والتقليم
     clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
+    
+    # إزالة الكلمات الشائعة غير المفيدة
+    common_words = ["SIGNAL", "ALERT", "INDICATOR", "STRATEGY", "TRADE", "CHART", "PATTERN"]
+    words = clean_signal.split()
+    filtered_words = [word for word in words if word not in common_words and len(word) > 2]
+    clean_signal = ' '.join(filtered_words)
     
     result = clean_signal if clean_signal else "إشارة غير معروفة"
     
@@ -231,8 +291,17 @@ def get_current_signals_info(symbol, direction):
     for sig, ts in signals:
         clean_signal = extract_clean_signal_name(sig)
         if clean_signal and clean_signal != "إشارة غير معروفة":
-            unique_signals.add(clean_signal)
-            signal_details.append((clean_signal, ts))
+            # التحقق من التكرار باستخدام similarity threshold
+            is_duplicate = False
+            for existing_signal in unique_signals:
+                similarity = calculate_similarity(clean_signal, existing_signal)
+                if similarity > 0.7:  # 70% similarity
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                unique_signals.add(clean_signal)
+                signal_details.append((clean_signal, ts))
     
     signal_count = len(signals)
     unique_count = len(unique_signals)
@@ -256,10 +325,25 @@ def has_required_different_signals(signals_list):
         return False, []
     
     unique_signals = set()
+    signal_details = []
+    
     for sig, ts in signals_list:
         clean_signal = extract_clean_signal_name(sig)
-        if clean_signal and clean_signal != "إشارة غير معروفة":
-            unique_signals.add(clean_signal)
+        
+        # تخطي الإشارات المتشابهة جداً
+        if clean_signal and clean_signal != "إشارة غير معروفة" and is_quality_signal(clean_signal):
+            # التحقق من التكرار باستخدام similarity threshold
+            is_duplicate = False
+            for existing_signal in unique_signals:
+                similarity = calculate_similarity(clean_signal, existing_signal)
+                if similarity > 0.7:  # 70% similarity
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                unique_signals.add(clean_signal)
+                signal_details.append((clean_signal, ts))
+        
         if len(unique_signals) >= REQUIRED_SIGNALS:
             return True, list(unique_signals)
     
@@ -338,11 +422,19 @@ def process_alerts(alerts):
                 if has_required:
                     saudi_time = get_saudi_time()
                     
+                    # تنظيف وتنسيق الإشارات للعرض
+                    formatted_signals = []
+                    for signal in unique_signals[:REQUIRED_SIGNALS]:
+                        # تقصير الإشارات الطويلة
+                        if len(signal) > 50:
+                            signal = signal[:47] + "..."
+                        formatted_signals.append(f'• {signal}')
+                    
                     if direction == "bullish":
                         message = f"""🚀 <b>{symbol} - تأكيد إشارة صعودية قوية</b>
 
 📊 <b>الإشارات المختلفة:</b>
-{chr(10).join([f'• {signal}' for signal in unique_signals[:REQUIRED_SIGNALS]])}
+{chr(10).join(formatted_signals)}
 
 🔢 <b>عدد الإشارات الكلي:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
@@ -352,7 +444,7 @@ def process_alerts(alerts):
                         message = f"""📉 <b>{symbol} - تأكيد إشارة هبوطية قوية</b>
 
 📊 <b>الإشارات المختلفة:</b>
-{chr(10).join([f'• {signal}' for signal in unique_signals[:REQUIRED_SIGNALS]])}
+{chr(10).join(formatted_signals)}
 
 🔢 <b>عدد الإشارات الكلي:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
