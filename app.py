@@ -1,153 +1,192 @@
+# tradingview_webhook_improved.py
+# نسخة محسّنة من مستقبل webhook مخصّص لـ TradingView
+# - معالجة التصفير بعد الإرسال مباشرة
+# - تصفير بعد 15 دقيقة بدون إشارات مختلفة
+# - منع التكرار النصي بدقة باستخدام تجزئة المحتوى
+# - حماية المتغيرات المشتركة (thread-safe)
+# - تحسينات على طلبات الشبكة (hash ثابت للـ request cache، retries)
+
 from flask import Flask, request, jsonify
 import requests
 from datetime import datetime, timedelta
 import os
-from collections import defaultdict
+from collections import defaultdict, deque
 import json
 import re
 import time
 import random
+import threading
+import hashlib
+import logging
+
+# ---------------------- إعداد السجل (logging) ----------------------
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+log = logging.getLogger("tv-webhook")
+
+# ---------------------- الإعدادات القابلة للتعديل ----------------------
+TIMEZONE_OFFSET = 3  # توقيت السعودية UTC+3
+REQUIRED_SIGNALS = 2
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c")
+CHAT_ID = os.environ.get("CHAT_ID", "624881400")
+RESET_TIMEOUT = 15 * 60  # 15 دقيقة بالثواني
+CACHE_DURATION = 30  # ثواني
+MAX_SIGNALS_PER_SYMBOL = 50  # حفظ آخر N إشارات لكل رمز/اتجاه
+NETWORK_TIMEOUT = 8  # ثواني لطلبات الشبكة
+NETWORK_RETRIES = 2
+
+# ---------------------- هياكل بيانات الحالة العالمية (محمية) ----------------------
+state_lock = threading.RLock()
+signal_counter = 0  # عداد تسلسلي للعرض البشري
+# mapping: content_hash -> {serial:int, text:str, first_seen:datetime}
+signal_mapping = {}
+# duplicate_signals: content_hash -> timestamp_when_seen
+duplicate_signals = {}
+# signal_memory: symbol -> {"bullish": deque([...]), "bearish": deque([...])}
+# كل عنصر في القائمة: {"text":..., "ts":datetime, "hash":..., "serial":...}
+signal_memory = defaultdict(lambda: {"bullish": deque(), "bearish": deque()})
+# طلبات مخبأة لتفادي التكرار المباشر: req_hash -> timestamp
+request_cache = {}
+
+# آخر وقت تلقى فيه إشارة فريدة (None يعني لا توجد إشارة حتى الآن)
+last_unique_signal_time = None
 
 app = Flask(__name__)
+session = requests.Session()
 
-# إعدادات التوقيت السعودي (UTC+3)
-TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 2
-TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
-CHAT_ID = "624881400"
+# ---------------------- أدوات مساعدة ----------------------
 
-# نظام الترقيم التسلسلي للإشارات
-signal_counter = 1
-signal_mapping = {}  # لتخزين mapping بين الرقم والإشارة
+def compute_hash(text: str) -> str:
+    """تجزئة ثابتة لمحتوى الإشارة لاكتشاف التكرار النصي بدقة"""
+    if text is None:
+        text = ""
+    return hashlib.sha256(text.strip().encode('utf-8')).hexdigest()
 
-# ذاكرة للإشارات المكررة وتوقيت التصفير
-duplicate_signals = set()
-last_unique_signal_time = datetime.utcnow()
-RESET_TIMEOUT = 900  # 15 دقيقة بالثواني
 
-# ذاكرة مؤقتة للطلبات
-request_cache = {}
-CACHE_DURATION = 30  # ثانية
-
-# الحصول على التوقيت السعودي بشكل محسن
-def get_saudi_time():
+def get_saudi_time() -> str:
     return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
 
-# إزالة علامات HTML بشكل محسن
-def remove_html_tags(text):
+
+def remove_html_tags(text: str) -> str:
     if not text:
         return text
-    return re.sub('<.*?>', '', text)
+    return re.sub(r'<.*?>', '', text)
 
-# إرسال التلغرام بشكل محسن
-session = requests.Session()
-def send_telegram_to_all(message):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-        
-        response = session.post(url, json=payload, timeout=3)
-        return response.status_code == 200
-            
-    except Exception:
-        return False
 
-# توليد رقم تسلسلي فريد لكل إشارة
-def generate_signal_id(signal_text):
-    global signal_counter
-    signal_id = signal_counter
-    signal_counter += 1
-    signal_mapping[signal_id] = signal_text
-    return signal_id
-
-# تحميل قائمة الأسهم بشكل محسن
+# ---------------------- تحميل قائمة الأسهم ----------------------
 _stock_list_cache = None
 _stock_list_cache_time = 0
-def load_stocks():
+
+def load_stocks(filename='stocks.txt'):
     global _stock_list_cache, _stock_list_cache_time
-    
-    if _stock_list_cache and time.time() - _stock_list_cache_time < 300:
-        return _stock_list_cache
-    
-    stocks = []
     try:
-        with open('stocks.txt', 'r') as f:
+        if _stock_list_cache and time.time() - _stock_list_cache_time < 300:
+            return _stock_list_cache
+        stocks = []
+        with open(filename, 'r', encoding='utf-8') as f:
             stocks = [line.strip().upper() for line in f if line.strip()]
-    except FileNotFoundError:
-        stocks = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30", "XAUUSD", "XAGUSD", "USOIL"]
-    
-    _stock_list_cache = stocks
-    _stock_list_cache_time = time.time()
-    return stocks
+        _stock_list_cache = stocks
+        _stock_list_cache_time = time.time()
+        return stocks
+    except Exception as e:
+        log.warning(f"لم أجد {filename} أو حدث خطأ في قراءته: {e} - سيتم استخدام قائمة افتراضية")
+        _stock_list_cache = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30", "XAUUSD", "XAGUSD", "USOIL"]
+        _stock_list_cache_time = time.time()
+        return _stock_list_cache
 
-# قائمة الأسهم
 STOCK_LIST = load_stocks()
+# ترتيب الرموز بحسب الطول تنازليًا لتفادي المطابقة الجزئية (مثلاً MATCH LONG before SHORT)
+STOCK_LIST_SORTED = sorted(STOCK_LIST, key=lambda x: -len(x))
 
-# ذاكرة الإشارات المحسنة
-MAX_SIGNALS_PER_SYMBOL = 20
-signal_memory = defaultdict(lambda: {"bullish": [], "bearish": []})
+# ---------------------- طلبات الشبكة مع retry بسيط ----------------------
 
-# طلب POST الخارجي المحسن
-def send_post_request(message, indicators, signal_type=None):
-    try:
-        url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
-        clean_message = remove_html_tags(message)
-        
-        payload = {
-            "text": clean_message,
-            "extras": {
-                "indicators": indicators,
-                "timestamp": datetime.utcnow().isoformat(),
-                "source": "tradingview-bot",
-                "original_signal_type": signal_type
-            }
-        }
-        
-        response = session.post(url, json=payload, timeout=3)
-        return response.status_code == 200
-            
-    except Exception:
+def post_with_retries(url, json_payload=None, timeout=NETWORK_TIMEOUT, retries=NETWORK_RETRIES):
+    last_exc = None
+    for attempt in range(retries + 1):
+        try:
+            resp = session.post(url, json=json_payload, timeout=timeout)
+            return resp
+        except Exception as e:
+            last_exc = e
+            log.warning(f"خطأ في الطلب إلى {url} (attempt {attempt+1}): {e}")
+            time.sleep(0.5 * (attempt + 1))
+    # آخر محاولة فاشلة
+    log.error(f"جميع محاولات الاتصال بـ {url} فشلت: {last_exc}")
+    return None
+
+
+# ---------------------- إرسال تلغرام وتحقق أوضح من النجاح ----------------------
+
+def send_telegram_to_all(message: str) -> bool:
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+    resp = post_with_retries(url, json_payload=payload)
+    if not resp:
         return False
+    try:
+        j = resp.json()
+        ok = j.get("ok", False)
+        if not ok:
+            log.warning(f"Telegram API returned ok=False: {j}")
+        return ok
+    except Exception:
+        # إذا لم نستطع تحليل JSON، نعتبر الفشل إذا لم يكن 200
+        return resp.status_code == 200
 
-# تنظيف الإشارات المحسن
-def cleanup_signals():
-    global duplicate_signals
-    
-    cutoff = datetime.utcnow() - timedelta(minutes=15)
-    cleanup_count = 0
-    
-    # تنظيف الإشارات المكررة القديمة
-    if duplicate_signals:
-        print(f"🧹 تنظيف ذاكرة الإشارات المكررة: {len(duplicate_signals)} إشارة")
-        duplicate_signals.clear()
-    
-    for symbol in list(signal_memory.keys()):
-        for direction in ["bullish", "bearish"]:
-            original_count = len(signal_memory[symbol][direction])
-            signal_memory[symbol][direction] = [
-                (sig, ts, signal_id) for sig, ts, signal_id in signal_memory[symbol][direction] 
-                if ts > cutoff
-            ]
-            cleanup_count += (original_count - len(signal_memory[symbol][direction]))
-            
-            if len(signal_memory[symbol][direction]) > MAX_SIGNALS_PER_SYMBOL:
-                signal_memory[symbol][direction] = signal_memory[symbol][direction][-MAX_SIGNALS_PER_SYMBOL:]
-        
-        if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish']:
-            del signal_memory[symbol]
-    
-    if cleanup_count > 0:
-        print(f"🧹 تم تنظيف {cleanup_count} إشارة قديمة")
 
-# تحليل سياق الرسالة
-def analyze_message_context(message):
-    """تحليل تلقائي لسياق الرسالة"""
-    message_lower = message.lower()
-    
+# ---------------------- طلب POST خارجي ----------------------
+
+def send_post_request(message: str, indicators: str, signal_type: str = None) -> bool:
+    url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
+    clean_message = remove_html_tags(message)
+    payload = {
+        "text": clean_message,
+        "extras": {
+            "indicators": indicators,
+            "timestamp": datetime.utcnow().isoformat(),
+            "source": "tradingview-bot",
+            "original_signal_type": signal_type
+        }
+    }
+    resp = post_with_retries(url, json_payload=payload)
+    if not resp:
+        return False
+    return resp.status_code == 200
+
+
+# ---------------------- استخراج الرمز ----------------------
+
+def extract_symbol(message: str) -> str:
+    message_upper = (message or "").upper()
+    # نبحث عن الرموز الأطول أولاً لتفادي التطابق الجزئي
+    for symbol in STOCK_LIST_SORTED:
+        # نستخدم حدود كلمات مرنة: لا نريد أن يكون جزءاً من كلمة أبجدية رقمية أخرى
+        pattern = rf'(?<![A-Z0-9_\-\.]){re.escape(symbol)}(?![A-Z0-9_\-\.])'
+        if re.search(pattern, message_upper):
+            log.debug(f"تم العثور على الرمز {symbol} في الرسالة")
+            return symbol
+    log.debug("لم يتم التعرف على أي رمز")
+    return "UNKNOWN"
+
+
+# ---------------------- تنظيف اسم الإشارة ----------------------
+
+def extract_clean_signal_name(raw_signal: str) -> str:
+    if not raw_signal or len(raw_signal.strip()) < 2:
+        return raw_signal
+    clean_signal = raw_signal.upper()
+    for symbol in STOCK_LIST:
+        clean_signal = clean_signal.replace(symbol, '')
+    clean_signal = re.sub(r'_\d+\.\d+', '', clean_signal)
+    clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
+    clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
+    clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
+    return clean_signal if clean_signal else raw_signal
+
+
+# ---------------------- تحليل سياق الرسالة ----------------------
+
+def analyze_message_context(message: str) -> str:
+    message_lower = (message or "").lower()
     context_hints = {
         "TECH": ["tech", "software", "iphone", "mac", "computer", "apple"],
         "FINANCIAL": ["bank", "credit", "payment", "financial", "visa", "mastercard"],
@@ -157,18 +196,16 @@ def analyze_message_context(message):
         "METALS": ["gold", "silver", "xau", "xag", "metal", "precious"],
         "RETAIL": ["retail", "store", "shop", "consumer", "amazon", "walmart"]
     }
-    
     for context, keywords in context_hints.items():
         if any(keyword in message_lower for keyword in keywords):
             return context
-    
     return "GENERAL"
 
-# معالجة الرموز القصيرة
-def handle_short_symbols(message, extracted_symbol):
-    """معالجة خاصة للرموز القصيرة التي يمكن أن تكون جزءاً من كلمات أخرى"""
-    message_upper = message.upper()
-    
+
+# ---------------------- معالجة الرموز القصيرة ----------------------
+
+def handle_short_symbols(message: str, extracted_symbol: str) -> str:
+    message_upper = (message or "").upper()
     short_symbols = {
         "V": ["VISA", "CREDIT", "PAYMENT", "FINANCIAL", "BANK"],
         "M": ["MACY", "MARKET", "MORNING", "MACYS"],
@@ -176,447 +213,328 @@ def handle_short_symbols(message, extracted_symbol):
         "T": ["AT&T", "TELE", "TECH", "TELEPHONE", "TMOBILE"],
         "X": ["XEROX", "XBOX", "XILINX"]
     }
-    
-    # إذا كان الرمز قصيراً وليس في قائمة الرموز القصيرة المعروفة
-    if len(extracted_symbol) <= 2 and extracted_symbol not in short_symbols:
-        print(f"   ⚠️  رمز قصير غير معروف: {extracted_symbol} - سيتم تجاهله")
-        return "UNKNOWN"
-    
+    if not extracted_symbol or len(extracted_symbol) <= 2:
+        if extracted_symbol not in short_symbols:
+            log.debug(f"رمز قصير غير معروف: {extracted_symbol}")
+            return "UNKNOWN"
     if extracted_symbol in short_symbols:
         contexts = short_symbols[extracted_symbol]
-        # إذا كان الرمز قصيراً، نتأكد من وجود السياق
         has_context = any(context in message_upper for context in contexts)
-        
         if not has_context:
-            # إذا لا يوجد سياق، نعتبره غير معروف
-            print(f"   ⚠️  لا يوجد سياق للرمز القصير: {extracted_symbol} - سيتم تجاهله")
+            log.debug(f"لا يوجد سياق للرمز القصير: {extracted_symbol}")
             return "UNKNOWN"
-    
     return extracted_symbol
 
-# استخراج الرمز بشكل محسن مع السياق
-def extract_symbol(message):
-    message_upper = message.upper()
-    
-    # البحث الدقيق بالرموز مع حدود الكلمات
-    for symbol in STOCK_LIST:
-        # استخدام regex للتأكد من أن الرمز ليس جزءاً من كلمة أخرى
-        if re.search(r'\b' + re.escape(symbol) + r'\b', message_upper):
-            print(f"   ✅ تم العثور على الرمز: {symbol} في الرسالة")
-            return symbol
-    
-    # إذا لم يتم العثور على أي رمز
-    print(f"   ⚠️  لم يتم العثور على أي رمز في الرسالة: {message_upper}")
-    return "UNKNOWN"
 
-# تنظيف اسم الإشارة للعرض فقط
-def extract_clean_signal_name(raw_signal):
-    if not raw_signal or len(raw_signal.strip()) < 2:
-        return raw_signal
-    
-    clean_signal = raw_signal.upper()
-    
-    # إزالة الرموز فقط للعرض
-    for symbol in STOCK_LIST:
-        clean_signal = clean_signal.replace(symbol, '')
-    
-    clean_signal = re.sub(r'_\d+\.\d+', '', clean_signal)
-    clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
-    clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
-    clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
-    
-    return clean_signal if clean_signal else raw_signal
+# ---------------------- تنظيف الإشارات والذاكرة ----------------------
 
-# الحصول على الإشارات الحالية للرمز والاتجاه
-def get_current_signals_info(symbol, direction):
-    """الحصول على معلومات منسقة عن الإشارات الحالية"""
-    signals = signal_memory.get(symbol, {}).get(direction, [])
-    if not signals:
-        return "لا توجد إشارات حتى الآن"
-    
-    unique_signal_ids = set()
-    signal_details = []
-    
-    for sig, ts, signal_id in signals:
-        if signal_id not in unique_signal_ids:
-            unique_signal_ids.add(signal_id)
-            clean_signal = extract_clean_signal_name(sig)
-            signal_details.append((clean_signal, ts))
-    
-    signal_count = len(signals)
-    unique_count = len(unique_signal_ids)
-    
-    # التحقق من وقت التصفير
-    current_time = datetime.utcnow()
-    time_remaining = RESET_TIMEOUT - (current_time - last_unique_signal_time).total_seconds()
-    minutes_remaining = max(0, int(time_remaining // 60))
-    seconds_remaining = max(0, int(time_remaining % 60))
-    
-    info = f"الحالية: {signal_count} إشارة، الفريدة: {unique_count} نوع"
-    
-    if time_remaining > 0:
-        info += f"\n⏰ وقت التصفير المتبقي: {minutes_remaining}:{seconds_remaining:02d}"
-    else:
-        info += f"\n⏰ جاهز للتصفير (انتهت المهلة)"
-    
-    if unique_signal_ids:
-        info += f"\n📋 الإشارات الحالية:\n"
-        for i, (signal_name, ts) in enumerate(signal_details[:10], 1):
-            time_str = ts.strftime('%H:%M:%S') if ts else "غير معروف"
-            info += f"   {i}. {signal_name} (منذ {time_str})\n"
-    
-    return info
+def cleanup_signals():
+    global duplicate_signals
+    with state_lock:
+        now = datetime.utcnow()
+        cutoff = now - timedelta(seconds=RESET_TIMEOUT)
+        removed = 0
 
-# فحص تفرد الإشارة باستخدام الأرقام التسلسلية
-def has_required_different_signals(signals_list):
-    global last_unique_signal_time, duplicate_signals
-    
-    # التحقق إذا حان وقت تصفير العد بسبب انتهاء المهلة
-    current_time = datetime.utcnow()
-    time_since_last_unique = (current_time - last_unique_signal_time).total_seconds()
-    
-    if time_since_last_unique > RESET_TIMEOUT and signals_list:
-        print("🔄 تصفير العد بسبب انتهاء المهلة (15 دقيقة بدون إشارات جديدة)")
-        duplicate_signals.clear()
-        last_unique_signal_time = current_time
-        # مسح جميع الإشارات القديمة
-        for symbol in signal_memory:
+        # تنظيف duplicate_signals حسب الوقت
+        old_hashes = [h for h, ts in duplicate_signals.items() if (now - ts).total_seconds() > RESET_TIMEOUT]
+        for h in old_hashes:
+            del duplicate_signals[h]
+            removed += 1
+
+        # تنظيف إشارات قديمة من signal_memory
+        for symbol in list(signal_memory.keys()):
             for direction in ["bullish", "bearish"]:
-                signal_memory[symbol][direction] = []
-        return False, []
-    
-    if len(signals_list) < REQUIRED_SIGNALS:
-        return False, []
-    
-    unique_signal_ids = set()
-    unique_signals_info = []
-    new_signals_received = False
-    
-    for sig, ts, signal_id in signals_list:
-        # تخطي الإشارات المكررة المسجلة مسبقاً
-        if signal_id in duplicate_signals:
-            print(f"⏭️  تخطي إشارة مكررة (ID: {signal_id})")
-            continue
-            
-        # التحقق من التكرار باستخدام الرقم التسلسلي
-        if signal_id not in unique_signal_ids:
-            unique_signal_ids.add(signal_id)
-            unique_signals_info.append((signal_mapping[signal_id], ts))
-            
-            # تحديث وقت آخر إشارة فريدة إذا كانت جديدة
-            if ts > last_unique_signal_time:
-                last_unique_signal_time = ts
-                new_signals_received = True
-        
-        if len(unique_signal_ids) >= REQUIRED_SIGNALS:
-            # إرجاع النصوص الأصلية للإشارات الفريدة
-            unique_signals = [signal_mapping[sid] for sid in list(unique_signal_ids)[:REQUIRED_SIGNALS]]
-            return True, unique_signals
-    
-    # إذا كانت هناك إشارات جديدة، تحديث الوقت
-    if new_signals_received:
-        last_unique_signal_time = current_time
-    
-    return False, [signal_mapping[sid] for sid in unique_signal_ids]
+                dq = signal_memory[symbol][direction]
+                orig_len = len(dq)
+                # احتفظ فقط بالإشارات الحديثة حتى MAX_SIGNALS_PER_SYMBOL
+                while len(dq) > MAX_SIGNALS_PER_SYMBOL:
+                    dq.popleft()
+                # إزالة العناصر الأقدم من cutoff
+                filtered = deque([item for item in dq if (now - item['ts']).total_seconds() <= RESET_TIMEOUT])
+                if len(filtered) != orig_len:
+                    removed += (orig_len - len(filtered))
+                    signal_memory[symbol][direction] = filtered
 
-# معالجة التنبيهات المحسنة مع تسجيل محسن
-def process_alerts(alerts):
-    global last_unique_signal_time, duplicate_signals
-    
-    start_time = time.time()
-    new_signals_added = False
-    
-    for alert in alerts:
-        if isinstance(alert, dict):
-            signal = alert.get("signal", alert.get("message", "")).strip()
-            ticker = alert.get("ticker", "").strip().upper()
-        else:
-            signal = str(alert).strip()
-            ticker = ""
+            # حذف المفتاح إذا لا يوجد إشارات
+            if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish']:
+                del signal_memory[symbol]
 
-        if not signal:
-            continue
+        if removed:
+            log.info(f"🧹 تنظيف: تم إزالة {removed} مدخلة قديمة")
 
-        message_upper = signal.upper()
-        print(f"🔍 تحليل الرسالة: '{signal}'")
-        
-        if not ticker or ticker == "UNKNOWN":
-            ticker = extract_symbol(signal)
-            print(f"   الرمز المستخرج: {ticker}")
-            
-        # منع التعيين التلقائي لرموز غير موجودة في الرسالة
-        if ticker != "UNKNOWN" and ticker not in message_upper:
-            print(f"   ⚠️  الرمز {ticker} غير موجود في الرسالة - سيتم تجاهله")
-            ticker = "UNKNOWN"
-            
-        # معالجة الرموز القصيرة
-        if len(ticker) <= 2 and ticker != "UNKNOWN":
-            old_ticker = ticker
-            ticker = handle_short_symbols(signal, ticker)
-            if ticker != old_ticker:
-                print(f"   تم تغيير الرمز من {old_ticker} إلى {ticker}")
 
-        if ticker == "UNKNOWN":
-            context = analyze_message_context(signal)
-            print(f"⚠️  لم يتم التعرف على الرمز: {signal}")
-            print(f"   السياق: {context}")
-            continue
+# ---------------------- التحقق من وجود إشارات مختلفة كافية ----------------------
 
-        signal_lower = signal.lower()
-        direction = "bearish" if any(word in signal_lower for word in ["bearish", "down", "put", "short", "sell"]) else "bullish"
-
-        if ticker not in signal_memory:
-            signal_memory[ticker] = {"bullish": [], "bearish": []}
-        
-        current_signals = signal_memory[ticker][direction]
-        
-        # التحقق من التكرار قبل التخزين
-        signal_id = generate_signal_id(signal)
-        
-        # إذا كانت الإشارة مكررة (نفس المحتوى موجود مسبقاً)
-        is_duplicate = False
-        for existing_sig, existing_ts, existing_id in current_signals:
-            if existing_sig == signal:
-                print(f"🚫 إشارة مكررة - تم تجاهلها: {signal}")
-                duplicate_signals.add(signal_id)
-                is_duplicate = True
+def has_required_different_signals(signals_list):
+    """تأخذ قائمة العناصر (كل عنصر dict) وتحدد إذا كان هناك REQUIRED_SIGNALS فريدة"""
+    unique_hashes = []
+    seen = set()
+    for item in signals_list:
+        h = item['hash']
+        if h not in seen:
+            seen.add(h)
+            unique_hashes.append(h)
+            if len(unique_hashes) >= REQUIRED_SIGNALS:
                 break
-        
-        if is_duplicate:
-            continue
-            
-        if len(current_signals) >= MAX_SIGNALS_PER_SYMBOL:
-            current_signals.pop(0)
-        
-        # تخزين الإشارة مع الرقم التسلسلي
-        current_time = datetime.utcnow()
-        current_signals.append((signal, current_time, signal_id))
-        new_signals_added = True
-        
-        # تحديث وقت آخر إشارة فريدة
-        last_unique_signal_time = current_time
-        
-        # تسجيل مفصل
-        clean_signal_name = extract_clean_signal_name(signal)
-        context = analyze_message_context(signal)
-        print(f"✅ تم تخزين إشارة {direction} لـ {ticker} (ID: {signal_id}): {clean_signal_name}")
-        print(f"   السياق: {context}")
+    if len(unique_hashes) >= REQUIRED_SIGNALS:
+        # إرجاع True مع النصوص (من mapping) للإشارات الفريدة
+        texts = [signal_mapping.get(h, {}).get('text', '<unknown>') for h in unique_hashes[:REQUIRED_SIGNALS]]
+        return True, texts, unique_hashes[:REQUIRED_SIGNALS]
+    return False, [], unique_hashes
 
-    # التنظيف الدوري
-    if random.random() < 0.3:
+
+# ---------------------- معالجة التنبيهات ----------------------
+
+def process_alerts(alerts):
+    """يعالج لائحة من التنبيهات (قابلة لأن تكون dict أو نص)"""
+    global last_unique_signal_time
+    now = datetime.utcnow()
+    with state_lock:
+        new_unique_seen = False
+
+    start_time = time.time()
+
+    for alert in alerts:
+        # استخراج نص الإشارة والرمز
+        if isinstance(alert, dict):
+            signal_text = (alert.get('signal') or alert.get('message') or alert.get('text') or '').strip()
+            ticker = (alert.get('ticker') or alert.get('symbol') or '').strip().upper()
+        else:
+            signal_text = str(alert).strip()
+            ticker = ''
+
+        if not signal_text:
+            continue
+
+        message_upper = signal_text.upper()
+        log.info(f"🔍 معالجة: {signal_text}")
+
+        if not ticker or ticker == 'UNKNOWN':
+            ticker = extract_symbol(signal_text)
+
+        if ticker != 'UNKNOWN' and ticker not in message_upper:
+            # إذا تم استخراج ticker لكنه غير موجود نصيًا، اعتبر UNKNOWN
+            ticker = 'UNKNOWN'
+
+        if len(ticker) <= 2 and ticker != 'UNKNOWN':
+            ticker_checked = handle_short_symbols(signal_text, ticker)
+            if ticker_checked == 'UNKNOWN':
+                ticker = 'UNKNOWN'
+
+        if ticker == 'UNKNOWN':
+            context = analyze_message_context(signal_text)
+            log.info(f"⚠️ لم يتم التعرف على رمز للإشارة. السياق: {context} - سيتم تجاهل الإشارة")
+            continue
+
+        # تحديد اتجاه الإشارة
+        s_lower = signal_text.lower()
+        direction = 'bearish' if any(w in s_lower for w in ['bearish', 'down', 'put', 'short', 'sell']) else 'bullish'
+
+        # حساب تجزئة المحتوى
+        content_hash = compute_hash(signal_text)
+
+        with state_lock:
+            # تحقق من التكرار: إذا ظهر hash سابقًا خلال نافذة التصفير الحاليّة، اعتبر تكراراً
+            if content_hash in duplicate_signals:
+                log.info(f"⏭️ إشارة مكررة (hash): {content_hash} - سيتم تجاهلها")
+                continue
+
+            # توليد رقم تسلسلي عرضي
+            global signal_counter
+            signal_counter += 1
+            serial = signal_counter
+            signal_mapping[content_hash] = {'serial': serial, 'text': signal_text, 'first_seen': now}
+            # إضافة إلى ذاكرة الإشارات للرمز والاتجاه
+            item = {'text': signal_text, 'ts': now, 'hash': content_hash, 'serial': serial}
+            dq = signal_memory[ticker][direction]
+            dq.append(item)
+            # إضافة إلى duplicate_signals مع طابع زمني
+            duplicate_signals[content_hash] = now
+            # تحديث آخر وقت لإشارة فريدة
+            last_unique_signal_time = now
+            new_unique_seen = True
+            log.info(f"✅ خزّننا إشارة {direction} لـ {ticker} (serial={serial})")
+
+        # تجنب إطالة الحلقة لو كانت دفعة ضخمة - لكن لا نقطع معالجة التنبيهات
+        if time.time() - start_time > 5.0:
+            log.info("⚠️ معالجة طويلة — الأن سأكمل ولكن قد تستغرق الدفعة وقتا")
+
+    # تنظيف دوري
+    if random.random() < 0.4:
         cleanup_signals()
 
-    # التحقق من الإشارات المطلوبة مع تسجيل محسن
-    for symbol, signals in list(signal_memory.items()):
-        for direction in ["bullish", "bearish"]:
-            signal_count = len(signals[direction])
-            if signal_count > 0:
-                signals_info = get_current_signals_info(symbol, direction)
-                has_required, unique_signals = has_required_different_signals(signals[direction])
-                
-                if has_required:
+    # بعد حفظ الإشارات، نتحقق هل وصلنا لعدد إشارات كافي لكل رمز/اتجاه
+    with state_lock:
+        for symbol, dirs in list(signal_memory.items()):
+            for direction in ['bullish', 'bearish']:
+                dq = dirs[direction]
+                if not dq:
+                    continue
+                has_req, unique_texts, unique_hashes = has_required_different_signals(list(dq))
+                if has_req:
                     saudi_time = get_saudi_time()
-                    
-                    # تنظيف وتنسيق الإشارات للعرض
-                    formatted_signals = []
-                    for signal_text in unique_signals[:REQUIRED_SIGNALS]:
-                        clean_signal = extract_clean_signal_name(signal_text)
-                        # تقصير الإشارات الطويلة
-                        if len(clean_signal) > 50:
-                            clean_signal = clean_signal[:47] + "..."
-                        formatted_signals.append(f'• {clean_signal}')
-                    
-                    if direction == "bullish":
-                        message = f"""🚀 <b>{symbol} - تأكيد إشارة صعودية قوية</b>
+                    # تنسيق الإشارات للعرض
+                    formatted = []
+                    for t in unique_texts[:REQUIRED_SIGNALS]:
+                        clean = extract_clean_signal_name(t)
+                        if len(clean) > 80:
+                            clean = clean[:77] + '...'
+                        formatted.append(f'• {clean}')
 
-📊 <b>الإشارات المختلفة:</b>
-{chr(10).join(formatted_signals)}
-
-🔢 <b>عدد الإشارات الكلي:</b> {signal_count}
-⏰ <b>التوقيت السعودي:</b> {saudi_time}
-
-<code>تأكيد صعودي قوي من {REQUIRED_SIGNALS} إشارات مختلفة - متوقع حركة صعودية</code>"""
+                    if direction == 'bullish':
+                        message = f"🚀 <b>{symbol} - تأكيد إشارة صعودية قوية</b>\n\n📊 <b>الإشارات المختلفة:</b>\n{chr(10).join(formatted)}\n\n🔢 <b>عدد الإشارات الكلي:</b> {len(dq)}\n⏰ <b>التوقيت السعودي:</b> {saudi_time}\n\n<code>تأكيد صعودي قوي من {REQUIRED_SIGNALS} إشارات مختلفة - متوقع حركة صعودية</code>"
                     else:
-                        message = f"""📉 <b>{symbol} - تأكيد إشارة هبوطية قوية</b>
+                        message = f"📉 <b>{symbol} - تأكيد إشارة هبوطية قوية</b>\n\n📊 <b>الإشارات المختلفة:</b>\n{chr(10).join(formatted)}\n\n🔢 <b>عدد الإشارات الكلي:</b> {len(dq)}\n⏰ <b>التوقيت السعودي:</b> {saudi_time}\n\n<code>تأكيد هبوطي قوي من {REQUIRED_SIGNALS} إشارات مختلفة - متوقع حركة هبوطية</code>"
 
-📊 <b>الإشارات المختلفة:</b>
-{chr(10).join(formatted_signals)}
-
-🔢 <b>عدد الإشارات الكلي:</b> {signal_count}
-⏰ <b>التوقيت السعودي:</b> {saudi_time}
-
-<code>تأكيد هبوطي قوي من {REQUIRED_SIGNALS} إشارات مختلفة - متوقع حركة هبوطية</code>"""
-                    
+                    # إرسال التنبيهات
                     telegram_success = send_telegram_to_all(message)
                     external_success = send_post_request(message, f"{direction.upper()} signals", 
-                                                       "BULLISH_CONFIRMATION" if direction == "bullish" else "BEARISH_CONFIRMATION")
-                    
-                    if telegram_success:
-                        print(f"🎉 تم إرسال التنبيه بنجاح لـ {symbol} ({direction})")
-                    
-                    # تصفير الذاكرة بعد الإرسال الناجح
-                    signal_memory[symbol][direction] = []
-                    duplicate_signals.clear()
-                    last_unique_signal_time = datetime.utcnow()
-                    print("🔄 تم تصفير العد بعد إرسال التنبيه بنجاح")
-                    
-                else:
-                    # التحقق من انتهاء المهلة لعرض الوقت المتبقي
-                    current_time = datetime.utcnow()
-                    time_remaining = RESET_TIMEOUT - (current_time - last_unique_signal_time).total_seconds()
-                    
-                    if time_remaining > 0:
-                        minutes = int(time_remaining // 60)
-                        seconds = int(time_remaining % 60)
-                        print(f"⏰ الوقت المتبقي للتصفير: {minutes}:{seconds:02d}")
-                    else:
-                        print("⏰ انتهت مدة التصفير (15 دقيقة)، جاهز للتصفير")
-                    
-                    print(f"⏳ في انتظار إشارات مختلفة لـ {symbol} ({direction})")
-                    print(f"   {signals_info}")
-                    print(f"   تحتاج {REQUIRED_SIGNALS} إشارات مختلفة، حالياً لديك {len(unique_signals)}")
-                    
-                    # إنهاء مبكر إذا استغرقت المعالجة وقتًا طويلاً
-                    if time.time() - start_time > 2.0:
-                        return
+                                                         "BULLISH_CONFIRMATION" if direction == 'bullish' else "BEARISH_CONFIRMATION")
 
-# تسجيل معلومات الطلب الوارد
+                    if telegram_success:
+                        log.info(f"🎉 تم إرسال تنبيه Telegram لـ {symbol} ({direction})")
+                    else:
+                        log.warning(f"❌ فشل إرسال Telegram لـ {symbol} ({direction})")
+
+                    if external_success:
+                        log.info(f"✅ تم إرسال إلى API الخارجي لـ {symbol} ({direction})")
+                    else:
+                        log.warning(f"❌ فشل إرسال إلى API الخارجي لـ {symbol} ({direction})")
+
+                    # التصفير بعد الإرسال: نزيل إشارات هذا الرمز والاتجاه فوراً
+                    # ونحذف مفاتيح duplicate المرتبطة بهذه الإشارات حتى نتمكن من التقاطها لاحقاً
+                    hashes_to_remove = {item['hash'] for item in dq}
+                    for h in hashes_to_remove:
+                        duplicate_signals.pop(h, None)
+                        # لا نحذف من signal_mapping كي نحافظ على سجل العرض (يمكن تقليصه لاحقاً)
+
+                    signal_memory[symbol][direction] = deque()
+                    last_unique_signal_time = datetime.utcnow()
+                    log.info(f"🔄 تم التصفير فورًا لـ {symbol} ({direction}) بعد الإرسال")
+
+    return
+
+
+# ---------------------- تسجيل الطلبات الواردة ----------------------
 @app.before_request
 def log_request_info():
     if request.path == '/webhook':
-        print(f"\n🌐 طلب وارد: {request.method} {request.path}")
-        print(f"🌐 نوع المحتوى: {request.content_type}")
+        log.info(f"🌐 طلب وارد: {request.method} {request.path} - Content-Type: {request.content_type}")
 
-# استقبال webhook
-@app.route("/webhook", methods=["POST"])
+
+# ---------------------- Webhook endpoint ----------------------
+@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        # التحقق من الطلبات المكررة
-        request_hash = hash(request.get_data())
-        current_time = time.time()
-        
-        if request_hash in request_cache:
-            if current_time - request_cache[request_hash] < CACHE_DURATION:
-                print("🔄 تخطي الطلب المكرر")
+        raw_bytes = request.get_data()
+        # استخدام sha256 ثابت لمفتاح التخزين المؤقت
+        req_hash = hashlib.sha256(raw_bytes).hexdigest()
+        now_ts = time.time()
+
+        with state_lock:
+            # تنظيف عناصر التخزين المؤقت القديمة
+            old_keys = [k for k, t in request_cache.items() if now_ts - t > CACHE_DURATION * 2]
+            for k in old_keys:
+                del request_cache[k]
+
+            # التحقق من التكرار المباشر
+            if req_hash in request_cache and now_ts - request_cache[req_hash] < CACHE_DURATION:
+                log.info("🔄 تخطي طلب webhook مكرر (cache)")
                 return jsonify({"status": "duplicate_skipped"}), 200
-        
-        request_cache[request_hash] = current_time
-        # تنظيف ذاكرة التخزين المؤقت القديمة
-        for key in list(request_cache.keys()):
-            if current_time - request_cache[key] > CACHE_DURATION * 2:
-                del request_cache[key]
-                
+
+            request_cache[req_hash] = now_ts
+
+        raw_text = raw_bytes.decode('utf-8', errors='ignore').strip()
+        log.info(f"📨 بيانات webhook ({len(raw_text)} chars): {raw_text[:200]}")
+
         alerts = []
-        raw_data = None
-
-        # تسجيل البيانات الخام
+        # محاولة تحليل JSON
         try:
-            raw_data = request.get_data(as_text=True).strip()
-            print(f"📨 تم استقبال بيانات webhook الخام: '{raw_data}'")
-            print(f"📦 طول البيانات: {len(raw_data)} حرف")
-            print(f"🔍 أول 100 حرف: {raw_data[:100]}{'...' if len(raw_data) > 100 else ''}")
-            
-            # محاولة تحليل JSON
-            if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
-                try:
-                    data = json.loads(raw_data)
-                    print(f"📊 بيانات JSON المحللة: {data}")
-                    
-                    if isinstance(data, dict):
-                        if "alerts" in data:
-                            alerts = data["alerts"]
-                        else:
-                            alerts = [data]
-                    elif isinstance(data, list):
-                        alerts = data
-                        
-                except json.JSONDecodeError as e:
-                    print(f"❌ خطأ في فك تشفير JSON: {e}")
-                    
-            elif raw_data:
-                alerts = [{"signal": raw_data, "raw_data": raw_data}]
-                
-        except Exception as parse_error:
-            print(f"❌ خطأ في تحليل البيانات الخام: {parse_error}")
+            if raw_text.startswith('{') or raw_text.startswith('['):
+                data = json.loads(raw_text)
+                if isinstance(data, dict):
+                    if 'alerts' in data and isinstance(data['alerts'], list):
+                        alerts = data['alerts']
+                    else:
+                        alerts = [data]
+                elif isinstance(data, list):
+                    alerts = data
+            else:
+                # إذا لم يكن JSON، خزن النص كإشارة مفردة
+                alerts = [{"signal": raw_text, "raw_data": raw_text}]
+        except json.JSONDecodeError:
+            # فشل التحليل => اعتبر النص كتنبيه واحد
+            alerts = [{"signal": raw_text, "raw_data": raw_text}]
 
-        # طريقة طلب JSON التقليدية
         if not alerts and request.is_json:
             try:
                 data = request.get_json(force=True)
-                print(f"📊 تم استقبال webhook JSON: {data}")
-                alerts = data.get("alerts", [])
-                if not alerts and data:
+                if isinstance(data, dict):
                     alerts = [data]
-            except Exception as json_error:
-                print(f"❌ خطأ في تحليل JSON: {json_error}")
+                elif isinstance(data, list):
+                    alerts = data
+            except Exception as e:
+                log.warning(f"فشل parse JSON من request.get_json: {e}")
 
-        # إذا لم تكن هناك تنبيهات، استخدم البيانات الخام
-        if not alerts and raw_data:
-            alerts = [{"signal": raw_data, "raw_data": raw_data}]
-
-        print(f"🔍 معالجة {len(alerts)} تنبيه(ات)")
-        
-        if alerts:
-            process_alerts(alerts)
-            return jsonify({
-                "status": "alert_processed", 
-                "count": len(alerts),
-                "timestamp": datetime.utcnow().isoformat()
-            }), 200
-        else:
-            print("⚠️ لم يتم العثور على تنبيهات صالحة في webhook")
+        if not alerts:
+            log.warning("⚠️ لم يتم العثور على أي تنبيهات بعد المحاولات - تجاهل")
             return jsonify({"status": "no_alerts"}), 200
 
+        # معالجة التنبيهات
+        process_alerts(alerts)
+        return jsonify({"status": "alert_processed", "count": len(alerts), "timestamp": datetime.utcnow().isoformat()}), 200
+
     except Exception as e:
-        print(f"❌ خطأ في webhook: {str(e)}")
+        log.exception(f"❌ خطأ في webhook: {e}")
         return jsonify({"status": "error", "message": str(e)}), 400
 
-# الصفحة الرئيسية للفحص
-@app.route("/")
+
+# ---------------------- الصفحة الرئيسية للفحص ----------------------
+@app.route('/')
 def home():
-    current_time = datetime.utcnow()
-    time_remaining = RESET_TIMEOUT - (current_time - last_unique_signal_time).total_seconds()
-    minutes_remaining = max(0, int(time_remaining // 60))
-    seconds_remaining = max(0, int(time_remaining % 60))
-    
-    return jsonify({
-        "status": "running",
-        "message": "مستقبل webhook الخاص بـ TradingView نشط",
-        "monitored_stocks": STOCK_LIST,
-        "required_signals": REQUIRED_SIGNALS,
-        "active_signals": {k: f"{len(v['bullish']) + len(v['bearish'])} signals" for k, v in signal_memory.items()},
-        "signal_counter": signal_counter,
-        "duplicate_signals_count": len(duplicate_signals),
-        "reset_time_remaining": f"{minutes_remaining}:{seconds_remaining:02d}",
-        "timestamp": datetime.utcnow().isoformat()
-    })
+    with state_lock:
+        if last_unique_signal_time:
+            elapsed = (datetime.utcnow() - last_unique_signal_time).total_seconds()
+            time_remaining = max(0, RESET_TIMEOUT - elapsed)
+        else:
+            time_remaining = 0
 
-# اختبار خدمة التلغرام والخادم الخارجي
+        minutes = int(time_remaining // 60)
+        seconds = int(time_remaining % 60)
+
+        active_signals = {k: f"{len(v['bullish']) + len(v['bearish'])} signals" for k, v in signal_memory.items()}
+        return jsonify({
+            "status": "running",
+            "message": "مستقبل webhook الخاص بـ TradingView نشط (محسّن)",
+            "monitored_stocks": STOCK_LIST,
+            "required_signals": REQUIRED_SIGNALS,
+            "active_signals": active_signals,
+            "signal_counter": signal_counter,
+            "duplicate_signals_count": len(duplicate_signals),
+            "reset_time_remaining": f"{minutes}:{seconds:02d}",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+
+# ---------------------- اختبار الخدمات ----------------------
+
 def test_services():
-    print("جاري اختبار الخدمات...")
-    
-    # اختبار التلغرام
-    telegram_result = send_telegram_to_all("🔧 رسالة اختبار من البوت - النظام يعمل!")
-    print(f"نتيجة اختبار التلغرام: {telegram_result}")
-    
-    # اختبار الخادم الخارجي
-    external_result = send_post_request("رسالة اختبار", "TEST_SIGNAL", "BULLISH_CONFIRMATION")
-    print(f"نتيجة اختبار API الخارجي: {external_result}")
-    
-    return telegram_result and external_result
+    log.info("جاري اختبار الخدمات...")
+    try:
+        telegram_result = send_telegram_to_all("🔧 رسالة اختبار من البوت - النظام يعمل!")
+        external_result = send_post_request("رسالة اختبار", "TEST_SIGNAL", "BULLISH_CONFIRMATION")
+        log.info(f"نتيجة اختبار التلغرام: {telegram_result}, نتيجة API الخارجي: {external_result}")
+        return telegram_result and external_result
+    except Exception as e:
+        log.exception(f"فشل اختبار الخدمات: {e}")
+        return False
 
-# تشغيل التطبيق
-if __name__ == "__main__":
-    # اختبار الخدمات أولاً
+
+# ---------------------- نقطة الدخول ----------------------
+if __name__ == '__main__':
+    # اختبار الخدمات (غير حاسم للتشغيل)
     test_services()
-    
-    port = int(os.environ.get("PORT", 10000))
-    print(f"🟢 تم بدء الخادم على المنفذ {port}")
-    print(f"🟢 مستقبل التلغرام: {CHAT_ID}")
-    print(f"🟢 الأسهم الخاضعة للمراقبة: {', '.join(STOCK_LIST)}")
-    print(f"🟢 التوقيت السعودي: UTC+{TIMEZONE_OFFSET}")
-    print(f"🟢 الإشارات المطلوبة: {REQUIRED_SIGNALS}")
-    print(f"🟢 وقت تصفير العد: 15 دقيقة")
-    print(f"🟢 API الخارجي: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
-    print("🟢 في انتظار webhooks من TradingView...")
-    app.run(host="0.0.0.0", port=port)
+
+    port = int(os.environ.get('PORT', 10000))
+    log.info(f"🟢 بدء الخادم على 0.0.0.0:{port} - مراقبة: {', '.join(STOCK_LIST)} - UTC+{TIMEZONE_OFFSET}")
+    app.run(host='0.0.0.0', port=port)
