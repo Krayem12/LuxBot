@@ -17,9 +17,9 @@ TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
 # Control flags - All signals enabled
-TREND_SIGNALS_ENABLED = True
+TREND_SIGNALS_ENABLED = fales
 REGULAR_SIGNALS_ENABLED = True
-TEST_MODE = False
+TEST_MODE = true
 
 # Cache for processed signals
 signal_cache = {}
