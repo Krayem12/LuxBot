@@ -64,7 +64,7 @@ def process_signal(signal_text: str):
     print(f"✅ خزّننا إشارة {direction} لـ {symbol}: {signal_name}")
 
     # ===== تحقق من عدد الإشارات المختلفة بنفس الاتجاه =====
-    if len(signals_store[symbol][direction]) >= 2:
+    if len(signals_store[symbol][direction]) >= 3:
         # جمع الإشارات المختلفة
         signals_list = list(signals_store[symbol][direction].values())
         total_signals = len(signals_list)
