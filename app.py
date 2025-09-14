@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # إعدادات التوقيت السعودي (UTC+3)
 TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 2  # تغيير من 3 إلى 2
+REQUIRED_SIGNALS = 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
@@ -196,6 +196,10 @@ def calculate_similarity(str1, str2):
     str1 = str1.lower()
     str2 = str2.lower()
     
+    # إذا كانت الإشارتان متطابقتان تماماً
+    if str1 == str2:
+        return 1.0
+    
     # طريقة بسيطة لحساب التشابه
     words1 = set(str1.split())
     words2 = set(str2.split())
@@ -230,7 +234,7 @@ def is_quality_signal(signal_text):
     
     return True
 
-# تحسين تنظيف اسم الإشارة مع التصحيح الإملائي
+# تنظيف اسم الإشارة (بدون تصحيح إملائي)
 def extract_clean_signal_name(raw_signal):
     if not raw_signal or len(raw_signal.strip()) < 2:
         return "إشارة غير واضحة"
@@ -239,26 +243,9 @@ def extract_clean_signal_name(raw_signal):
     if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
         return signal_cache[cache_key]['value']
     
-    # التصحيح الإملائي التلقائي
-    corrections = {
-        "REERSAL": "REVERSAL",
-        "OERBOUGHT": "OVERBOUGHT", 
-        "WAE": "WAVE",
-        "DOWNWARD": "DOWNWARD",
-        "UPWARD": "UPWARD",
-        "BULLISH": "BULLISH",
-        "BEARISH": "BEARISH",
-        "OSCILLATOR": "OSCILLATOR",
-        "INDICATOR": "INDICATOR"
-    }
-    
     clean_signal = raw_signal.upper()
     
-    # تطبيق التصحيحات الإملائية
-    for wrong, correct in corrections.items():
-        clean_signal = clean_signal.replace(wrong, correct)
-    
-    # إزالة الرموز والأرقام
+    # إزالة الرموز فقط
     for symbol in STOCK_LIST:
         clean_signal = clean_signal.replace(symbol, '')
     
@@ -273,7 +260,7 @@ def extract_clean_signal_name(raw_signal):
     filtered_words = [word for word in words if word not in common_words and len(word) > 2]
     clean_signal = ' '.join(filtered_words)
     
-    result = clean_signal if clean_signal else "إشارة غير معروفة"
+    result = clean_signal if clean_signal else raw_signal.upper()  # استخدام الإشارة الأصلية إذا فشل التنظيف
     
     signal_cache[cache_key] = {'value': result, 'time': time.time()}
     return result
@@ -290,18 +277,22 @@ def get_current_signals_info(symbol, direction):
     signal_details = []
     for sig, ts in signals:
         clean_signal = extract_clean_signal_name(sig)
-        if clean_signal and clean_signal != "إشارة غير معروفة":
-            # التحقق من التكرار باستخدام similarity threshold
-            is_duplicate = False
-            for existing_signal in unique_signals:
-                similarity = calculate_similarity(clean_signal, existing_signal)
-                if similarity > 0.7:  # 70% similarity
-                    is_duplicate = True
-                    break
+        
+        # استخدام الإشارة الأصلية إذا كانت غير واضحة بعد التنظيف
+        if not clean_signal or clean_signal == "إشارة غير واضحة":
+            clean_signal = sig.upper()
             
-            if not is_duplicate:
-                unique_signals.add(clean_signal)
-                signal_details.append((clean_signal, ts))
+        # التحقق من التكرار باستخدام similarity threshold
+        is_duplicate = False
+        for existing_signal in unique_signals:
+            similarity = calculate_similarity(clean_signal, existing_signal)
+            if similarity > 0.7:  # 70% similarity
+                is_duplicate = True
+                break
+        
+        if not is_duplicate:
+            unique_signals.add(clean_signal)
+            signal_details.append((clean_signal, ts))
     
     signal_count = len(signals)
     unique_count = len(unique_signals)
@@ -325,24 +316,28 @@ def has_required_different_signals(signals_list):
         return False, []
     
     unique_signals = set()
-    signal_details = []
     
     for sig, ts in signals_list:
         clean_signal = extract_clean_signal_name(sig)
         
-        # تخطي الإشارات المتشابهة جداً
-        if clean_signal and clean_signal != "إشارة غير معروفة" and is_quality_signal(clean_signal):
-            # التحقق من التكرار باستخدام similarity threshold
-            is_duplicate = False
-            for existing_signal in unique_signals:
-                similarity = calculate_similarity(clean_signal, existing_signal)
-                if similarity > 0.7:  # 70% similarity
-                    is_duplicate = True
-                    break
+        # استخدام الإشارة الأصلية إذا كانت غير واضحة بعد التنظيف
+        if not clean_signal or clean_signal == "إشارة غير واضحة":
+            clean_signal = sig.upper()
             
-            if not is_duplicate:
-                unique_signals.add(clean_signal)
-                signal_details.append((clean_signal, ts))
+        # تخطي الإشارات العامة جداً
+        if not is_quality_signal(clean_signal):
+            continue
+            
+        # التحقق من التكرار باستخدام similarity threshold
+        is_duplicate = False
+        for existing_signal in unique_signals:
+            similarity = calculate_similarity(clean_signal, existing_signal)
+            if similarity > 0.7:  # 70% similarity
+                is_duplicate = True
+                break
+        
+        if not is_duplicate:
+            unique_signals.add(clean_signal)
         
         if len(unique_signals) >= REQUIRED_SIGNALS:
             return True, list(unique_signals)
