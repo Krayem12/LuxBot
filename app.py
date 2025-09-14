@@ -16,10 +16,10 @@ REQUIRED_SIGNALS = 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# Control flags - All signals enabled
-TREND_SIGNALS_ENABLED = fales
+# Control flags - Trend disabled, Test mode enabled
+TREND_SIGNALS_ENABLED = False
 REGULAR_SIGNALS_ENABLED = True
-TEST_MODE = true
+TEST_MODE = True
 
 # Cache for processed signals
 signal_cache = {}
@@ -169,7 +169,7 @@ def has_required_different_signals(signals_list):
 
 def check_trend_alignment(symbol, direction):
     if not TREND_SIGNALS_ENABLED:
-        return True
+        return True  # Always return True when trend signals are disabled
         
     trend_catcher = trend_signals[symbol]["trend_catcher"]
     trend_tracer = trend_signals[symbol]["trend_tracer"]
