@@ -5,33 +5,30 @@ import os
 from collections import defaultdict
 import json
 import re
-import time
-import random
 
 app = Flask(__name__)
 
-# Saudi time settings (UTC+3)
-TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 3
+# 🔹 إعداد التوقيت السعودي (UTC+3)
+TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
+
+# 🔹 عدد الإشارات المطلوبة (تم التغيير من 1 إلى 2)
+REQUIRED_SIGNALS = 2
+
+# 🔹 بيانات التليجرام الصحيحة
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# Cache for processed signals
-signal_cache = {}
-CACHE_TIMEOUT = 300
-
-# Optimized get Saudi time
+# 🔹 الحصول على التوقيت السعودي
 def get_saudi_time():
     return (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime('%H:%M:%S')
 
-# Optimized HTML tag removal
+# 🔹 إزالة تنسيق HTML من النص
 def remove_html_tags(text):
-    if not text:
-        return text
-    return re.sub('<.*?>', '', text)
+    """إزالة علامات HTML من النص"""
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', text)
 
-# Optimized Telegram sending
-session = requests.Session()
+# 🔹 إرسال رسالة لمستخدم واحد
 def send_telegram_to_all(message):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -41,293 +38,257 @@ def send_telegram_to_all(message):
             "parse_mode": "HTML"
         }
         
-        response = session.post(url, json=payload, timeout=3)
-        return response.status_code == 200
+        # ⏰ timeout قصير لتجنب تجميد الخادم
+        response = requests.post(url, json=payload, timeout=5)
+        print(f"✅ تم الإرسال إلى {CHAT_ID}: {response.status_code}")
+        
+        if response.status_code == 200:
+            print("🎉 تم إرسال الرسالة بنجاح إلى التليجرام!")
+            return True
+        else:
+            print(f"❌ فشل إرسال الرسالة: {response.status_code}")
+            return False
             
-    except Exception:
+    except requests.exceptions.Timeout:
+        print("⏰ timeout التليجرام: تجاوز الوقت المحدد (5 ثواني)")
+        return False
+    except requests.exceptions.ConnectionError:
+        print("🔌 فشل الاتصال بالتليجرام")
+        return False
+    except Exception as e:
+        print(f"❌ خطأ في إرسال التليجرام: {e}")
         return False
 
-# Optimized stock list loading
-_stock_list_cache = None
-_stock_list_cache_time = 0
+# 🔹 تحميل قائمة الأسهم من ملف
 def load_stocks():
-    global _stock_list_cache, _stock_list_cache_time
-    
-    if _stock_list_cache and time.time() - _stock_list_cache_time < 300:
-        return _stock_list_cache
-    
     stocks = []
     try:
         with open('stocks.txt', 'r') as f:
             stocks = [line.strip().upper() for line in f if line.strip()]
     except FileNotFoundError:
-        stocks = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30"]
-    
-    _stock_list_cache = stocks
-    _stock_list_cache_time = time.time()
+        print("⚠️  ملف stocks.txt غير موجود. سيتم استخدام قائمة افتراضية.")
+        stocks = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30"]  # قائمة افتراضية
     return stocks
 
-# Stock list
+# قائمة الأسهم
 STOCK_LIST = load_stocks()
 
-# Optimized signal memory
-MAX_SIGNALS_PER_SYMBOL = 20
-signal_memory = defaultdict(lambda: {"bullish": [], "bearish": []})
+# 🔹 ذاكرة مؤقتة لتخزين الإشارات لكل سهم
+signal_memory = defaultdict(lambda: {
+    "bullish": [],
+    "bearish": []
+})
 
-# Optimized external POST
+# 🔹 إرسال POST خارجي (معدل لإرسال رسالة بدون تنسيق HTML)
 def send_post_request(message, indicators, signal_type=None):
-    try:
-        url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
-        clean_message = remove_html_tags(message)
-        
-        payload = {
-            "text": clean_message,
-            "extras": {
-                "indicators": indicators,
-                "timestamp": datetime.utcnow().isoformat(),
-                "source": "tradingview-bot",
-                "original_signal_type": signal_type
-            }
+    url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
+    
+    # إزالة تنسيق HTML من الرسالة
+    clean_message = remove_html_tags(message)
+    
+    # إرسال الرسالة بدون تنسيق HTML إلى الخادم الخارجي
+    payload = {
+        "text": clean_message,  # الرسالة بدون تنسيق HTML
+        "extras": {
+            "indicators": indicators,
+            "timestamp": datetime.utcnow().isoformat(),
+            "source": "tradingview-bot",
+            "original_signal_type": signal_type
         }
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        print(f"✅ تم إرسال الطلب الخارجي: {response.status_code}")
         
-        response = session.post(url, json=payload, timeout=3)
-        return response.status_code == 200
+        if response.status_code == 200:
+            print("🎉 تم إرسال البيانات بنجاح إلى الخادم الخارجي!")
+            return True
+        else:
+            print(f"❌ فشل الإرسال الخارجي: {response.status_code} - {response.text}")
+            return False
             
-    except Exception:
+    except requests.exceptions.Timeout:
+        print("⏰ timeout الإرسال الخارجي: تجاوز الوقت المحدد")
+        return False
+    except requests.exceptions.ConnectionError:
+        print("🔌 فشل الاتصال بالخادم الخارجي")
+        return False
+    except Exception as e:
+        print(f"❌ خطأ في الإرسال الخارجي: {e}")
         return False
 
-# Optimized cleanup
+# 🔹 تنظيف الإشارات القديمة (أكثر من 15 دقيقة)
 def cleanup_signals():
     cutoff = datetime.utcnow() - timedelta(minutes=15)
-    cleanup_count = 0
-    
     for symbol in list(signal_memory.keys()):
         for direction in ["bullish", "bearish"]:
-            original_count = len(signal_memory[symbol][direction])
             signal_memory[symbol][direction] = [
                 (sig, ts) for sig, ts in signal_memory[symbol][direction] 
                 if ts > cutoff
             ]
-            cleanup_count += (original_count - len(signal_memory[symbol][direction]))
-            
-            if len(signal_memory[symbol][direction]) > MAX_SIGNALS_PER_SYMBOL:
-                signal_memory[symbol][direction] = signal_memory[symbol][direction][-MAX_SIGNALS_PER_SYMBOL:]
-        
+        # تنظيف الذاكرة من الأسهم الفارغة
         if not signal_memory[symbol]['bullish'] and not signal_memory[symbol]['bearish']:
             del signal_memory[symbol]
-    
-    if cleanup_count > 0:
-        print(f"🧹 Cleaned {cleanup_count} old signals")
 
-# Optimized symbol extraction
-_symbol_patterns = [
-    ("SPX", "SPX500"), ("500", "SPX500"),
-    ("BTC", "BTCUSDT"), ("ETH", "ETHUSDT"),
-    ("NASDAQ", "NASDAQ100"), ("100", "NASDAQ100"),
-    ("DOW", "US30"), ("US30", "US30"), ("30", "US30")
-]
-
+# ✅ استخراج اسم السهم من الرسالة (معدل)
 def extract_symbol(message):
     message_upper = message.upper()
     
-    for symbol in STOCK_LIST:
+    # البحث عن أي رمز سهم في القائمة (بترتيب عكسي للأطول أولاً لتجنب المطابقات الجزئية)
+    sorted_stocks = sorted(STOCK_LIST, key=len, reverse=True)
+    for symbol in sorted_stocks:
         if symbol in message_upper:
             return symbol
     
-    for pattern, symbol in _symbol_patterns:
-        if pattern in message_upper:
-            return symbol
+    # إذا لم يتم العثور، البحث عن patterns معروفة
+    if "SPX" in message_upper or "500" in message_upper:
+        return "SPX500"
+    elif "BTC" in message_upper:
+        return "BTCUSDT" 
+    elif "ETH" in message_upper:
+        return "ETHUSDT"
+    elif "NASDAQ" in message_upper or "100" in message_upper:
+        return "NASDAQ100"
+    elif "DOW" in message_upper or "US30" in message_upper or "30" in message_upper:
+        return "US30"
     
-    return "UNKNOWN"
+    return "SPX500"  # افتراضي
 
-# Improved signal name cleaning - remove stock symbols and timestamps
-def extract_clean_signal_name(raw_signal):
-    cache_key = f"signal_{hash(raw_signal)}"
-    if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
-        return signal_cache[cache_key]['value']
+# ✅ استخراج اسم الإشارة من الرسالة
+def extract_signal_name(raw_signal):
+    signal_lower = raw_signal.lower()
     
-    # Remove timestamps
-    clean_signal = re.sub(r'_\d+\.\d+', '', raw_signal)
-    
-    # Remove numbers
-    clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
-    
-    # Remove stock symbols from the signal text
-    for symbol in STOCK_LIST:
-        clean_signal = clean_signal.replace(symbol, '').replace(symbol.lower(), '')
-    
-    # Remove known patterns
-    for pattern, symbol in _symbol_patterns:
-        clean_signal = clean_signal.replace(pattern, '').replace(pattern.lower(), '')
-    
-    # Remove special Unicode characters (like directional marks)
-    clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
-    
-    # Clean up extra spaces and trim
-    clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
-    
-    result = clean_signal if clean_signal else "Unknown Signal"
-    
-    signal_cache[cache_key] = {'value': result, 'time': time.time()}
-    return result
+    if "bullish" in signal_lower and "bos" in signal_lower:
+        return "كسر هيكل صعودي"
+    elif "bearish" in signal_lower and "bos" in signal_lower:
+        return "كسر هيكل هبوطي"
+    elif "bullish" in signal_lower and "choch" in signal_lower:
+        return "تغير Character صعودي"
+    elif "bearish" in signal_lower and "choch" in signal_lower:
+        return "تغير Character هبوطي"
+    elif "bullish" in signal_lower and "confluence" in signal_lower:
+        return "تقارب صعودي قوي"
+    elif "bearish" in signal_lower and "confluence" in signal_lower:
+        return "تقارب هبوطي قوي"
+    elif "bullish" in signal_lower:
+        return "إشارة صعودية"
+    elif "bearish" in signal_lower:
+        return "إشارة هبوطية"
+    else:
+        return raw_signal  # إرجاع النص الأصلي إذا لم يتم التعرف
 
-# Get current signals for a symbol and direction
-def get_current_signals_info(symbol, direction):
-    """Get formatted information about current signals"""
-    signals = signal_memory.get(symbol, {}).get(direction, [])
-    if not signals:
-        return "No signals yet"
-    
-    # Get unique signal names
-    unique_signals = set()
-    signal_details = []
-    for sig, ts in signals:
-        clean_signal = extract_clean_signal_name(sig)
-        unique_signals.add(clean_signal)
-        signal_details.append((clean_signal, ts))
-    
-    signal_count = len(signals)
-    unique_count = len(unique_signals)
-    
-    info = f"Current: {signal_count} signals, Unique: {unique_count} types"
-    
-    # Add signal names with timestamps if there are signals
-    if unique_signals:
-        info += f"\n📋 Current signals:\n"
-        for i, signal_name in enumerate(list(unique_signals)[:10], 1):
-            # Find the first occurrence of this signal
-            first_occurrence = next((ts for sig, ts in signal_details if sig == signal_name), None)
-            time_str = first_occurrence.strftime('%H:%M:%S') if first_occurrence else "Unknown"
-            info += f"   {i}. {signal_name} (since {time_str})\n"
-    
-    return info
-
-# Optimized signal uniqueness check
-def has_required_different_signals(signals_list):
-    if len(signals_list) < REQUIRED_SIGNALS:
-        return False, []
-    
-    unique_signals = set()
-    for sig, ts in signals_list:
-        clean_signal = extract_clean_signal_name(sig)
-        unique_signals.add(clean_signal)
-        if len(unique_signals) >= REQUIRED_SIGNALS:
-            return True, list(unique_signals)
-    
-    return False, list(unique_signals)
-
-# Optimized alert processing with better logging
+# ✅ معالجة التنبيهات مع شرط اجتماع إشارتين على الأقل
 def process_alerts(alerts):
-    start_time = time.time()
-    
+    now = datetime.utcnow()
+    print(f"🔍 Processing {len(alerts)} alerts")
+
     for alert in alerts:
         if isinstance(alert, dict):
             signal = alert.get("signal", alert.get("message", "")).strip()
+            direction = alert.get("direction", "bullish").strip().lower()
             ticker = alert.get("ticker", "")
         else:
             signal = str(alert).strip()
+            direction = "bullish"
             ticker = ""
 
-        if not signal:
-            continue
-
+        # استخراج السهم إذا لم يكن موجودًا
         if not ticker or ticker == "UNKNOWN":
             ticker = extract_symbol(signal)
 
         if ticker == "UNKNOWN":
+            print(f"⚠️ Could not extract symbol from: {signal}")
             continue
 
+        # تحديد الاتجاه تلقائياً من الإشارة
         signal_lower = signal.lower()
-        direction = "bearish" if any(word in signal_lower for word in ["bearish", "down", "put", "short"]) else "bullish"
+        if "bearish" in signal_lower or "down" in signal_lower or "put" in signal_lower or "short" in signal_lower:
+            direction = "bearish"
+        else:
+            direction = "bullish"
 
+        # تخزين الإشارة
         if ticker not in signal_memory:
             signal_memory[ticker] = {"bullish": [], "bearish": []}
-        
-        current_signals = signal_memory[ticker][direction]
-        if len(current_signals) >= MAX_SIGNALS_PER_SYMBOL:
-            current_signals.pop(0)
-        
-        current_signals.append((signal, datetime.utcnow()))
-        
-        # Log each stored signal with cleaned name
-        clean_signal_name = extract_clean_signal_name(signal)
-        print(f"✅ Stored {direction} signal for {ticker}: {clean_signal_name}")
 
-    # Clean up periodically
-    if random.random() < 0.3:
-        cleanup_signals()
+        unique_key = f"{signal}_{now.timestamp()}"
+        signal_memory[ticker][direction].append((unique_key, now))
+        print(f"✅ Stored {direction} signal for {ticker}: {signal}")
 
-    # Check for required signals with improved logging
-    for symbol, signals in list(signal_memory.items()):
+    # تنظيف الإشارات القديمة
+    cleanup_signals()
+
+    # التحقق من إشارات كل سهم - إشارتان على الأقل (تم التغيير من 1 إلى 2)
+    for symbol, signals in signal_memory.items():
         for direction in ["bullish", "bearish"]:
-            signal_count = len(signals[direction])
-            if signal_count > 0:
-                # Always show progress, not just when waiting
-                signals_info = get_current_signals_info(symbol, direction)
-                has_required, unique_signals = has_required_different_signals(signals[direction])
+            if len(signals[direction]) >= REQUIRED_SIGNALS:  # إشارتان على الأقل
+                signal_count = len(signals[direction])
                 
-                if has_required:
-                    saudi_time = get_saudi_time()
-                    
-                    if direction == "bullish":
-                        message = f"""🚀 <b>{symbol} - تأكيد إشارة صعودية قوية</b>
+                # استخراج اسم الإشارة من آخر إشارة مخزنة
+                last_signal = signals[direction][-1][0] if signals[direction] else "إشارة"
+                signal_name = extract_signal_name(last_signal)
+                
+                # الحصول على التوقيت السعودي
+                saudi_time = get_saudi_time()
+                
+                if direction == "bullish":
+                    message = f"""🚀 <b>{symbol} - إشارة صعودية</b>
 
-📊 <b>الإشارات المختلفة:</b>
-{chr(10).join([f'• {signal}' for signal in unique_signals[:REQUIRED_SIGNALS]])}
-
-🔢 <b>عدد الإشارات الكلي:</b> {signal_count}
+📊 <b>نوع الإشارة:</b> {signal_name}
+🔢 <b>عدد الإشارات:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
-<code>تأكيد صعودي قوي من {REQUIRED_SIGNALS} إشارات مختلفة - متوقع حركة صعودية</code>"""
-                    else:
-                        message = f"""📉 <b>{symbol} - تأكيد إشارة هبوطية قوية</b>
-
-📊 <b>الإشارات المختلفة:</b>
-{chr(10).join([f'• {signal}' for signal in unique_signals[:REQUIRED_SIGNALS]])}
-
-🔢 <b>عدد الإشارات الكلي:</b> {signal_count}
-⏰ <b>التوقيت السعودي:</b> {saudi_time}
-
-<code>تأكيد هبوطي قوي من {REQUIRED_SIGNALS} إشارات مختلفة - متوقع حركة هبوطية</code>"""
-                    
-                    telegram_success = send_telegram_to_all(message)
-                    external_success = send_post_request(message, f"{direction.upper()} signals", 
-                                                       "BULLISH_CONFIRMATION" if direction == "bullish" else "BEARISH_CONFIRMATION")
-                    
-                    if telegram_success:
-                        print(f"🎉 Alert sent successfully for {symbol} ({direction})")
-                    
-                    signal_memory[symbol][direction] = []
-                    
+<code>انطلاق صعودي متوقع</code>"""
+                    signal_type = "BULLISH_CONFIRMATION"
                 else:
-                    print(f"⏳ Waiting for different signals for {symbol} ({direction})")
-                    print(f"   {signals_info}")
-                    print(f"   Need {REQUIRED_SIGNALS} different signals, currently have {len(unique_signals)}")
-                    
-                    # Break early if processing taking too long
-                    if time.time() - start_time > 2.0:
-                        return
+                    message = f"""📉 <b>{symbol} - إشارة هبوطية</b>
 
-# Log incoming request information
+📊 <b>نوع الإشارة:</b> {signal_name}
+🔢 <b>عدد الإشارات:</b> {signal_count}
+⏰ <b>التوقيت السعودي:</b> {saudi_time}
+
+<code>انطلاق هبوطي متوقع</code>"""
+                    signal_type = "BEARISH_CONFIRMATION"
+                
+                # إرسال إلى التليجرام (مع تنسيق HTML)
+                telegram_success = send_telegram_to_all(message)
+                
+                # إرسال إلى الخادم الخارجي (بدون تنسيق HTML)
+                external_success = send_post_request(message, f"{direction.upper()} signals", signal_type)
+                
+                if telegram_success and external_success:
+                    print(f"🎉 تم إرسال التنبيه بنجاح لـ {symbol}")
+                elif telegram_success and not external_success:
+                    print(f"⚠️ تم الإرسال للتليجرام لكن فشل الخادم الخارجي لـ {symbol}")
+                else:
+                    print(f"❌ فشل الإرسال بالكامل لـ {symbol}")
+                
+                # مسح الإشارات بعد الإرسال
+                signal_memory[symbol][direction] = []
+                print(f"📤 Sent alert for {symbol} ({direction})")
+
+# 🔹 تسجيل معلومات الطلب الوارد (للت Debug)
 @app.before_request
 def log_request_info():
     if request.path == '/webhook':
         print(f"\n🌐 Incoming request: {request.method} {request.path}")
         print(f"🌐 Content-Type: {request.content_type}")
+        print(f"🌐 Headers: { {k: v for k, v in request.headers.items() if k.lower() not in ['authorization', 'cookie']} }")
 
-# Receive webhook
+# ✅ استقبال الويب هوك (محدث)
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
         alerts = []
         raw_data = None
 
-        # Log raw data
+        # تسجيل البيانات الخام
         try:
             raw_data = request.get_data(as_text=True).strip()
             print(f"📨 Received raw webhook data: '{raw_data}'")
             
-            # Try to parse JSON
+            # محاولة تحليل JSON
             if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
                 try:
                     data = json.loads(raw_data)
@@ -337,20 +298,22 @@ def webhook():
                         if "alerts" in data:
                             alerts = data["alerts"]
                         else:
-                            alerts = [data]
+                            alerts = [data]  # معالجة ككائن مباشر
                     elif isinstance(data, list):
                         alerts = data
                         
                 except json.JSONDecodeError as e:
                     print(f"❌ JSON decode error: {e}")
+                    # الاستمرار بالمعالجة كنص عادي
                     
             elif raw_data:
+                # معالجة كرسالة نصية مباشرة
                 alerts = [{"signal": raw_data, "raw_data": raw_data}]
                 
         except Exception as parse_error:
             print(f"❌ Raw data parse error: {parse_error}")
 
-        # Traditional JSON request method
+        # الطريقة التقليدية لطلب JSON
         if not alerts and request.is_json:
             try:
                 data = request.get_json(force=True)
@@ -361,7 +324,7 @@ def webhook():
             except Exception as json_error:
                 print(f"❌ JSON parse error: {json_error}")
 
-        # If no alerts, use raw data
+        # إذا لم يكن هناك alerts، استخدام البيانات الخام
         if not alerts and raw_data:
             alerts = [{"signal": raw_data, "raw_data": raw_data}]
 
@@ -382,35 +345,34 @@ def webhook():
         print(f"❌ Error in webhook: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 400
 
-# Home page for checking
+# 🔹 صفحة الرئيسية للفحص
 @app.route("/")
 def home():
     return jsonify({
         "status": "running",
         "message": "TradingView Webhook Receiver is active",
         "monitored_stocks": STOCK_LIST,
-        "required_signals": REQUIRED_SIGNALS,
         "active_signals": {k: v for k, v in signal_memory.items()},
         "timestamp": datetime.utcnow().isoformat()
     })
 
-# Test Telegram and external server
+# 🔹 اختبار التليجرام والخادم الخارجي
 def test_services():
     print("Testing services...")
     
-    # Test Telegram
+    # اختبار التليجرام
     telegram_result = send_telegram_to_all("🔧 Test message from bot - System is working!")
     print(f"Telegram test result: {telegram_result}")
     
-    # Test external server
+    # اختبار الخادم الخارجي
     external_result = send_post_request("Test message", "TEST_SIGNAL", "BULLISH_CONFIRMATION")
     print(f"External API test result: {external_result}")
     
     return telegram_result and external_result
 
-# Run the application
+# 🔹 تشغيل التطبيق
 if __name__ == "__main__":
-    # Test services first
+    # اختبار الخدمات أولاً
     test_services()
     
     port = int(os.environ.get("PORT", 10000))
