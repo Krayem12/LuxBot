@@ -20,6 +20,11 @@ CHAT_ID = "624881400"
 signal_counter = 1
 signal_mapping = {}  # لتخزين mapping بين الرقم والإشارة
 
+# ذاكرة للإشارات المكررة وتوقيت التصفير
+duplicate_signals = set()
+last_signal_time = datetime.utcnow()
+RESET_TIMEOUT = 900  # 15 دقيقة بالثواني
+
 # ذاكرة مؤقتة للطلبات
 request_cache = {}
 CACHE_DURATION = 30  # ثانية
@@ -110,8 +115,15 @@ def send_post_request(message, indicators, signal_type=None):
 
 # تنظيف الإشارات المحسن
 def cleanup_signals():
+    global duplicate_signals
+    
     cutoff = datetime.utcnow() - timedelta(minutes=15)
     cleanup_count = 0
+    
+    # تنظيف الإشارات المكررة القديمة
+    if duplicate_signals:
+        print(f"🧹 تنظيف ذاكرة الإشارات المكررة: {len(duplicate_signals)} إشارة")
+        duplicate_signals.clear()
     
     for symbol in list(signal_memory.keys()):
         for direction in ["bullish", "bearish"]:
@@ -234,7 +246,14 @@ def get_current_signals_info(symbol, direction):
     signal_count = len(signals)
     unique_count = len(unique_signal_ids)
     
+    # التحقق من وقت التصفير
+    current_time = datetime.utcnow()
+    time_remaining = RESET_TIMEOUT - (current_time - last_signal_time).total_seconds()
+    minutes_remaining = max(0, int(time_remaining // 60))
+    seconds_remaining = max(0, int(time_remaining % 60))
+    
     info = f"الحالية: {signal_count} إشارة، الفريدة: {unique_count} نوع"
+    info += f"\n⏰ وقت التصفير المتبقي: {minutes_remaining}:{seconds_remaining:02d}"
     
     if unique_signal_ids:
         info += f"\n📋 الإشارات الحالية:\n"
@@ -246,6 +265,22 @@ def get_current_signals_info(symbol, direction):
 
 # فحص تفرد الإشارة باستخدام الأرقام التسلسلية
 def has_required_different_signals(signals_list):
+    global last_signal_time, duplicate_signals
+    
+    # التحقق إذا حان وقت تصفير العد
+    current_time = datetime.utcnow()
+    time_since_last = (current_time - last_signal_time).total_seconds()
+    
+    if time_since_last > RESET_TIMEOUT:
+        print("🔄 تصفير العد بسبب انتهاء المهلة (15 دقيقة)")
+        duplicate_signals.clear()
+        last_signal_time = current_time
+        # مسح جميع الإشارات القديمة
+        for symbol in signal_memory:
+            for direction in ["bullish", "bearish"]:
+                signal_memory[symbol][direction] = []
+        return False, []
+    
     if len(signals_list) < REQUIRED_SIGNALS:
         return False, []
     
@@ -253,6 +288,11 @@ def has_required_different_signals(signals_list):
     unique_signals_info = []
     
     for sig, ts, signal_id in signals_list:
+        # تخطي الإشارات المكررة المسجلة مسبقاً
+        if signal_id in duplicate_signals:
+            print(f"⏭️  تخطي إشارة مكررة (ID: {signal_id})")
+            continue
+            
         # التحقق من التكرار باستخدام الرقم التسلسلي
         if signal_id not in unique_signal_ids:
             unique_signal_ids.add(signal_id)
@@ -267,6 +307,8 @@ def has_required_different_signals(signals_list):
 
 # معالجة التنبيهات المحسنة مع تسجيل محسن
 def process_alerts(alerts):
+    global last_signal_time, duplicate_signals
+    
     start_time = time.time()
     
     for alert in alerts:
@@ -312,12 +354,28 @@ def process_alerts(alerts):
             signal_memory[ticker] = {"bullish": [], "bearish": []}
         
         current_signals = signal_memory[ticker][direction]
+        
+        # التحقق من التكرار قبل التخزين
+        signal_id = generate_signal_id(signal)
+        
+        # إذا كانت الإشارة مكررة (نفس المحتوى موجود مسبقاً)
+        is_duplicate = False
+        for existing_sig, existing_ts, existing_id in current_signals:
+            if existing_sig == signal:
+                print(f"🚫 إشارة مكررة - تم تجاهلها: {signal}")
+                duplicate_signals.add(signal_id)
+                is_duplicate = True
+                break
+        
+        if is_duplicate:
+            continue
+            
         if len(current_signals) >= MAX_SIGNALS_PER_SYMBOL:
             current_signals.pop(0)
         
         # تخزين الإشارة مع الرقم التسلسلي
-        signal_id = generate_signal_id(signal)
         current_signals.append((signal, datetime.utcnow(), signal_id))
+        last_signal_time = datetime.utcnow()
         
         # تسجيل مفصل
         clean_signal_name = extract_clean_signal_name(signal)
@@ -377,7 +435,10 @@ def process_alerts(alerts):
                     if telegram_success:
                         print(f"🎉 تم إرسال التنبيه بنجاح لـ {symbol} ({direction})")
                     
+                    # تصفير الذاكرة بعد الإرسال الناجح
                     signal_memory[symbol][direction] = []
+                    duplicate_signals.clear()
+                    last_signal_time = datetime.utcnow()
                     
                 else:
                     print(f"⏳ في انتظار إشارات مختلفة لـ {symbol} ({direction})")
@@ -482,6 +543,11 @@ def webhook():
 # الصفحة الرئيسية للفحص
 @app.route("/")
 def home():
+    current_time = datetime.utcnow()
+    time_remaining = RESET_TIMEOUT - (current_time - last_signal_time).total_seconds()
+    minutes_remaining = max(0, int(time_remaining // 60))
+    seconds_remaining = max(0, int(time_remaining % 60))
+    
     return jsonify({
         "status": "running",
         "message": "مستقبل webhook الخاص بـ TradingView نشط",
@@ -489,6 +555,8 @@ def home():
         "required_signals": REQUIRED_SIGNALS,
         "active_signals": {k: f"{len(v['bullish']) + len(v['bearish'])} signals" for k, v in signal_memory.items()},
         "signal_counter": signal_counter,
+        "duplicate_signals_count": len(duplicate_signals),
+        "reset_time_remaining": f"{minutes_remaining}:{seconds_remaining:02d}",
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -517,6 +585,7 @@ if __name__ == "__main__":
     print(f"🟢 الأسهم الخاضعة للمراقبة: {', '.join(STOCK_LIST)}")
     print(f"🟢 التوقيت السعودي: UTC+{TIMEZONE_OFFSET}")
     print(f"🟢 الإشارات المطلوبة: {REQUIRED_SIGNALS}")
+    print(f"🟢 وقت تصفير العد: 15 دقيقة")
     print(f"🟢 API الخارجي: https://backend-thrumming-moon-2807.fly.dev/sendMessage")
     print("🟢 في انتظار webhooks من TradingView...")
     app.run(host="0.0.0.0", port=port)
