@@ -22,7 +22,7 @@ signal_mapping = {}  # لتخزين mapping بين الرقم والإشارة
 
 # ذاكرة للإشارات المكررة وتوقيت التصفير
 duplicate_signals = set()
-last_signal_time = datetime.utcnow()
+last_unique_signal_time = datetime.utcnow()
 RESET_TIMEOUT = 900  # 15 دقيقة بالثواني
 
 # ذاكرة مؤقتة للطلبات
@@ -248,12 +248,16 @@ def get_current_signals_info(symbol, direction):
     
     # التحقق من وقت التصفير
     current_time = datetime.utcnow()
-    time_remaining = RESET_TIMEOUT - (current_time - last_signal_time).total_seconds()
+    time_remaining = RESET_TIMEOUT - (current_time - last_unique_signal_time).total_seconds()
     minutes_remaining = max(0, int(time_remaining // 60))
     seconds_remaining = max(0, int(time_remaining % 60))
     
     info = f"الحالية: {signal_count} إشارة، الفريدة: {unique_count} نوع"
-    info += f"\n⏰ وقت التصفير المتبقي: {minutes_remaining}:{seconds_remaining:02d}"
+    
+    if time_remaining > 0:
+        info += f"\n⏰ وقت التصفير المتبقي: {minutes_remaining}:{seconds_remaining:02d}"
+    else:
+        info += f"\n⏰ جاهز للتصفير (انتهت المهلة)"
     
     if unique_signal_ids:
         info += f"\n📋 الإشارات الحالية:\n"
@@ -265,16 +269,16 @@ def get_current_signals_info(symbol, direction):
 
 # فحص تفرد الإشارة باستخدام الأرقام التسلسلية
 def has_required_different_signals(signals_list):
-    global last_signal_time, duplicate_signals
+    global last_unique_signal_time, duplicate_signals
     
-    # التحقق إذا حان وقت تصفير العد
+    # التحقق إذا حان وقت تصفير العد بسبب انتهاء المهلة
     current_time = datetime.utcnow()
-    time_since_last = (current_time - last_signal_time).total_seconds()
+    time_since_last_unique = (current_time - last_unique_signal_time).total_seconds()
     
-    if time_since_last > RESET_TIMEOUT:
-        print("🔄 تصفير العد بسبب انتهاء المهلة (15 دقيقة)")
+    if time_since_last_unique > RESET_TIMEOUT and signals_list:
+        print("🔄 تصفير العد بسبب انتهاء المهلة (15 دقيقة بدون إشارات جديدة)")
         duplicate_signals.clear()
-        last_signal_time = current_time
+        last_unique_signal_time = current_time
         # مسح جميع الإشارات القديمة
         for symbol in signal_memory:
             for direction in ["bullish", "bearish"]:
@@ -286,6 +290,7 @@ def has_required_different_signals(signals_list):
     
     unique_signal_ids = set()
     unique_signals_info = []
+    new_signals_received = False
     
     for sig, ts, signal_id in signals_list:
         # تخطي الإشارات المكررة المسجلة مسبقاً
@@ -297,19 +302,29 @@ def has_required_different_signals(signals_list):
         if signal_id not in unique_signal_ids:
             unique_signal_ids.add(signal_id)
             unique_signals_info.append((signal_mapping[signal_id], ts))
+            
+            # تحديث وقت آخر إشارة فريدة إذا كانت جديدة
+            if ts > last_unique_signal_time:
+                last_unique_signal_time = ts
+                new_signals_received = True
         
         if len(unique_signal_ids) >= REQUIRED_SIGNALS:
             # إرجاع النصوص الأصلية للإشارات الفريدة
             unique_signals = [signal_mapping[sid] for sid in list(unique_signal_ids)[:REQUIRED_SIGNALS]]
             return True, unique_signals
     
+    # إذا كانت هناك إشارات جديدة، تحديث الوقت
+    if new_signals_received:
+        last_unique_signal_time = current_time
+    
     return False, [signal_mapping[sid] for sid in unique_signal_ids]
 
 # معالجة التنبيهات المحسنة مع تسجيل محسن
 def process_alerts(alerts):
-    global last_signal_time, duplicate_signals
+    global last_unique_signal_time, duplicate_signals
     
     start_time = time.time()
+    new_signals_added = False
     
     for alert in alerts:
         if isinstance(alert, dict):
@@ -374,8 +389,12 @@ def process_alerts(alerts):
             current_signals.pop(0)
         
         # تخزين الإشارة مع الرقم التسلسلي
-        current_signals.append((signal, datetime.utcnow(), signal_id))
-        last_signal_time = datetime.utcnow()
+        current_time = datetime.utcnow()
+        current_signals.append((signal, current_time, signal_id))
+        new_signals_added = True
+        
+        # تحديث وقت آخر إشارة فريدة
+        last_unique_signal_time = current_time
         
         # تسجيل مفصل
         clean_signal_name = extract_clean_signal_name(signal)
@@ -438,9 +457,21 @@ def process_alerts(alerts):
                     # تصفير الذاكرة بعد الإرسال الناجح
                     signal_memory[symbol][direction] = []
                     duplicate_signals.clear()
-                    last_signal_time = datetime.utcnow()
+                    last_unique_signal_time = datetime.utcnow()
+                    print("🔄 تم تصفير العد بعد إرسال التنبيه بنجاح")
                     
                 else:
+                    # التحقق من انتهاء المهلة لعرض الوقت المتبقي
+                    current_time = datetime.utcnow()
+                    time_remaining = RESET_TIMEOUT - (current_time - last_unique_signal_time).total_seconds()
+                    
+                    if time_remaining > 0:
+                        minutes = int(time_remaining // 60)
+                        seconds = int(time_remaining % 60)
+                        print(f"⏰ الوقت المتبقي للتصفير: {minutes}:{seconds:02d}")
+                    else:
+                        print("⏰ انتهت مدة التصفير (15 دقيقة)، جاهز للتصفير")
+                    
                     print(f"⏳ في انتظار إشارات مختلفة لـ {symbol} ({direction})")
                     print(f"   {signals_info}")
                     print(f"   تحتاج {REQUIRED_SIGNALS} إشارات مختلفة، حالياً لديك {len(unique_signals)}")
@@ -544,7 +575,7 @@ def webhook():
 @app.route("/")
 def home():
     current_time = datetime.utcnow()
-    time_remaining = RESET_TIMEOUT - (current_time - last_signal_time).total_seconds()
+    time_remaining = RESET_TIMEOUT - (current_time - last_unique_signal_time).total_seconds()
     minutes_remaining = max(0, int(time_remaining // 60))
     seconds_remaining = max(0, int(time_remaining % 60))
     
