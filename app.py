@@ -16,9 +16,11 @@ REQUIRED_SIGNALS = 2
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# ذاكرة مؤقتة للإشارات المعالجة
-signal_cache = {}
-CACHE_TIMEOUT = 300
+# نظام الترقيم التسلسلي للإشارات
+signal_counter = 1
+signal_mapping = {}  # لتخزين mapping بين الرقم والإشارة
+
+# ذاكرة مؤقتة للطلبات
 request_cache = {}
 CACHE_DURATION = 30  # ثانية
 
@@ -48,6 +50,14 @@ def send_telegram_to_all(message):
             
     except Exception:
         return False
+
+# توليد رقم تسلسلي فريد لكل إشارة
+def generate_signal_id(signal_text):
+    global signal_counter
+    signal_id = signal_counter
+    signal_counter += 1
+    signal_mapping[signal_id] = signal_text
+    return signal_id
 
 # تحميل قائمة الأسهم بشكل محسن
 _stock_list_cache = None
@@ -107,7 +117,7 @@ def cleanup_signals():
         for direction in ["bullish", "bearish"]:
             original_count = len(signal_memory[symbol][direction])
             signal_memory[symbol][direction] = [
-                (sig, ts) for sig, ts in signal_memory[symbol][direction] 
+                (sig, ts, signal_id) for sig, ts, signal_id in signal_memory[symbol][direction] 
                 if ts > cutoff
             ]
             cleanup_count += (original_count - len(signal_memory[symbol][direction]))
@@ -187,65 +197,14 @@ def extract_symbol(message):
     print(f"   ⚠️  لم يتم العثور على أي رمز في الرسالة: {message_upper}")
     return "UNKNOWN"
 
-# حساب التشابه بين النصوص
-def calculate_similarity(str1, str2):
-    """حساب درجة التشابه بين نصين"""
-    if not str1 or not str2:
-        return 0
-    
-    str1 = str1.lower()
-    str2 = str2.lower()
-    
-    # إذا كانت الإشارتان متطابقتان تماماً
-    if str1 == str2:
-        return 1.0
-    
-    # طريقة بسيطة لحساب التشابه
-    words1 = set(str1.split())
-    words2 = set(str2.split())
-    
-    if not words1 or not words2:
-        return 0
-    
-    intersection = words1.intersection(words2)
-    union = words1.union(words2)
-    
-    return len(intersection) / len(union) if union else 0
-
-# التحقق من جودة الإشارة
-def is_quality_signal(signal_text):
-    """التحقق من جودة الإشارة"""
-    if not signal_text or len(signal_text.strip()) < 10:
-        return False
-    
-    # تخطي الإشارات العامة جداً
-    generic_phrases = [
-        "reversal", "signal", "alert", "indicator", 
-        "buy", "sell", "entry", "exit", "trade"
-    ]
-    
-    signal_lower = signal_text.lower()
-    generic_count = sum(1 for phrase in generic_phrases if phrase in signal_lower)
-    
-    # إذا كانت معظم الكلمات عامة، تخطي الإشارة
-    words = signal_lower.split()
-    if words and generic_count / len(words) > 0.5:
-        return False
-    
-    return True
-
-# تنظيف اسم الإشارة (بدون تصحيح إملائي)
+# تنظيف اسم الإشارة للعرض فقط
 def extract_clean_signal_name(raw_signal):
     if not raw_signal or len(raw_signal.strip()) < 2:
-        return "إشارة غير واضحة"
-    
-    cache_key = f"signal_{hash(raw_signal)}"
-    if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
-        return signal_cache[cache_key]['value']
+        return raw_signal
     
     clean_signal = raw_signal.upper()
     
-    # إزالة الرموز فقط
+    # إزالة الرموز فقط للعرض
     for symbol in STOCK_LIST:
         clean_signal = clean_signal.replace(symbol, '')
     
@@ -254,16 +213,7 @@ def extract_clean_signal_name(raw_signal):
     clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
     clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
     
-    # إزالة الكلمات الشائعة غير المفيدة
-    common_words = ["SIGNAL", "ALERT", "INDICATOR", "STRATEGY", "TRADE", "CHART", "PATTERN"]
-    words = clean_signal.split()
-    filtered_words = [word for word in words if word not in common_words and len(word) > 2]
-    clean_signal = ' '.join(filtered_words)
-    
-    result = clean_signal if clean_signal else raw_signal.upper()  # استخدام الإشارة الأصلية إذا فشل التنظيف
-    
-    signal_cache[cache_key] = {'value': result, 'time': time.time()}
-    return result
+    return clean_signal if clean_signal else raw_signal
 
 # الحصول على الإشارات الحالية للرمز والاتجاه
 def get_current_signals_info(symbol, direction):
@@ -272,77 +222,48 @@ def get_current_signals_info(symbol, direction):
     if not signals:
         return "لا توجد إشارات حتى الآن"
     
-    # الحصول على أسماء الإشارات الفريدة
-    unique_signals = set()
+    unique_signal_ids = set()
     signal_details = []
-    for sig, ts in signals:
-        clean_signal = extract_clean_signal_name(sig)
-        
-        # استخدام الإشارة الأصلية إذا كانت غير واضحة بعد التنظيف
-        if not clean_signal or clean_signal == "إشارة غير واضحة":
-            clean_signal = sig.upper()
-            
-        # التحقق من التكرار باستخدام similarity threshold
-        is_duplicate = False
-        for existing_signal in unique_signals:
-            similarity = calculate_similarity(clean_signal, existing_signal)
-            if similarity > 0.7:  # 70% similarity
-                is_duplicate = True
-                break
-        
-        if not is_duplicate:
-            unique_signals.add(clean_signal)
+    
+    for sig, ts, signal_id in signals:
+        if signal_id not in unique_signal_ids:
+            unique_signal_ids.add(signal_id)
+            clean_signal = extract_clean_signal_name(sig)
             signal_details.append((clean_signal, ts))
     
     signal_count = len(signals)
-    unique_count = len(unique_signals)
+    unique_count = len(unique_signal_ids)
     
     info = f"الحالية: {signal_count} إشارة، الفريدة: {unique_count} نوع"
     
-    # إضافة أسماء الإشارات مع الطوابع الزمنية إذا كانت هناك إشارات
-    if unique_signals:
+    if unique_signal_ids:
         info += f"\n📋 الإشارات الحالية:\n"
-        for i, signal_name in enumerate(list(unique_signals)[:10], 1):
-            # العثور على أول occurrence لهذه الإشارة
-            first_occurrence = next((ts for sig, ts in signal_details if sig == signal_name), None)
-            time_str = first_occurrence.strftime('%H:%M:%S') if first_occurrence else "غير معروف"
+        for i, (signal_name, ts) in enumerate(signal_details[:10], 1):
+            time_str = ts.strftime('%H:%M:%S') if ts else "غير معروف"
             info += f"   {i}. {signal_name} (منذ {time_str})\n"
     
     return info
 
-# فحص تفرد الإشارة المحسن
+# فحص تفرد الإشارة باستخدام الأرقام التسلسلية
 def has_required_different_signals(signals_list):
     if len(signals_list) < REQUIRED_SIGNALS:
         return False, []
     
-    unique_signals = set()
+    unique_signal_ids = set()
+    unique_signals_info = []
     
-    for sig, ts in signals_list:
-        clean_signal = extract_clean_signal_name(sig)
+    for sig, ts, signal_id in signals_list:
+        # التحقق من التكرار باستخدام الرقم التسلسلي
+        if signal_id not in unique_signal_ids:
+            unique_signal_ids.add(signal_id)
+            unique_signals_info.append((signal_mapping[signal_id], ts))
         
-        # استخدام الإشارة الأصلية إذا كانت غير واضحة بعد التنظيف
-        if not clean_signal or clean_signal == "إشارة غير واضحة":
-            clean_signal = sig.upper()
-            
-        # تخطي الإشارات العامة جداً
-        if not is_quality_signal(clean_signal):
-            continue
-            
-        # التحقق من التكرار باستخدام similarity threshold
-        is_duplicate = False
-        for existing_signal in unique_signals:
-            similarity = calculate_similarity(clean_signal, existing_signal)
-            if similarity > 0.7:  # 70% similarity
-                is_duplicate = True
-                break
-        
-        if not is_duplicate:
-            unique_signals.add(clean_signal)
-        
-        if len(unique_signals) >= REQUIRED_SIGNALS:
-            return True, list(unique_signals)
+        if len(unique_signal_ids) >= REQUIRED_SIGNALS:
+            # إرجاع النصوص الأصلية للإشارات الفريدة
+            unique_signals = [signal_mapping[sid] for sid in list(unique_signal_ids)[:REQUIRED_SIGNALS]]
+            return True, unique_signals
     
-    return False, list(unique_signals)
+    return False, [signal_mapping[sid] for sid in unique_signal_ids]
 
 # معالجة التنبيهات المحسنة مع تسجيل محسن
 def process_alerts(alerts):
@@ -394,12 +315,14 @@ def process_alerts(alerts):
         if len(current_signals) >= MAX_SIGNALS_PER_SYMBOL:
             current_signals.pop(0)
         
-        current_signals.append((signal, datetime.utcnow()))
+        # تخزين الإشارة مع الرقم التسلسلي
+        signal_id = generate_signal_id(signal)
+        current_signals.append((signal, datetime.utcnow(), signal_id))
         
         # تسجيل مفصل
         clean_signal_name = extract_clean_signal_name(signal)
         context = analyze_message_context(signal)
-        print(f"✅ تم تخزين إشارة {direction} لـ {ticker}: {clean_signal_name}")
+        print(f"✅ تم تخزين إشارة {direction} لـ {ticker} (ID: {signal_id}): {clean_signal_name}")
         print(f"   السياق: {context}")
 
     # التنظيف الدوري
@@ -419,11 +342,12 @@ def process_alerts(alerts):
                     
                     # تنظيف وتنسيق الإشارات للعرض
                     formatted_signals = []
-                    for signal in unique_signals[:REQUIRED_SIGNALS]:
+                    for signal_text in unique_signals[:REQUIRED_SIGNALS]:
+                        clean_signal = extract_clean_signal_name(signal_text)
                         # تقصير الإشارات الطويلة
-                        if len(signal) > 50:
-                            signal = signal[:47] + "..."
-                        formatted_signals.append(f'• {signal}')
+                        if len(clean_signal) > 50:
+                            clean_signal = clean_signal[:47] + "..."
+                        formatted_signals.append(f'• {clean_signal}')
                     
                     if direction == "bullish":
                         message = f"""🚀 <b>{symbol} - تأكيد إشارة صعودية قوية</b>
@@ -563,7 +487,8 @@ def home():
         "message": "مستقبل webhook الخاص بـ TradingView نشط",
         "monitored_stocks": STOCK_LIST,
         "required_signals": REQUIRED_SIGNALS,
-        "active_signals": {k: v for k, v in signal_memory.items()},
+        "active_signals": {k: f"{len(v['bullish']) + len(v['bearish'])} signals" for k, v in signal_memory.items()},
+        "signal_counter": signal_counter,
         "timestamp": datetime.utcnow().isoformat()
     })
 
