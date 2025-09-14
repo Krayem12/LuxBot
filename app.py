@@ -12,14 +12,14 @@ app = Flask(__name__)
 
 # Settings (UTC+3)
 TIMEZONE_OFFSET = 3
-REQUIRED_SIGNALS = 1  # Changed to 1 signal required
+REQUIRED_SIGNALS = 1
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# Control flags - Trend disabled, Test mode enabled
-TREND_SIGNALS_ENABLED = False
+# Control flags - ALL ENABLED, Test mode disabled
+TREND_SIGNALS_ENABLED = True
 REGULAR_SIGNALS_ENABLED = True
-TEST_MODE = True
+TEST_MODE = False
 
 # Cache for processed signals
 signal_cache = {}
@@ -169,7 +169,7 @@ def has_required_different_signals(signals_list):
 
 def check_trend_alignment(symbol, direction):
     if not TREND_SIGNALS_ENABLED:
-        return True  # Always return True when trend signals are disabled
+        return True
         
     trend_catcher = trend_signals[symbol]["trend_catcher"]
     trend_tracer = trend_signals[symbol]["trend_tracer"]
