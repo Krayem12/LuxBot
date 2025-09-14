@@ -3,102 +3,115 @@ import requests
 from datetime import datetime, timedelta
 import hashlib
 from collections import defaultdict
+from PIL import Image, ImageDraw, ImageFont
+import io
 
 app = Flask(__name__)
 
-# ===== إعداد التوقيت السعودي =====
-TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
-
-# ===== إعدادات التليجرام =====
+TIMEZONE_OFFSET = 3
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
-# ===== إعداد تخزين الإشارات =====
-# نخزن النصوص مع الهاش للتحقق من التكرار
 signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
 
-# ===== دالة ارسال رسالة للتليجرام =====
-def send_telegram(message: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
-    try:
-        response = requests.post(url, data=payload, timeout=10)
-        if response.status_code == 200:
-            print(f"✅ أرسلنا للتليجرام")
-        else:
-            print(f"⚠️ فشل ارسال التليجرام ({response.status_code}): {response.text}")
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء ارسال التليجرام: {e}")
-
-# ===== دالة إنشاء هاش فريد للإشارة =====
 def hash_signal(signal_text: str):
     return hashlib.sha256(signal_text.encode()).hexdigest()
 
-# ===== دالة معالجة الإشارة =====
+def create_signal_image(symbol, direction, signals_list, total_signals):
+    # حجم الصورة يعتمد على عدد الإشارات
+    width, height = 900, 250 + 35 * len(signals_list)
+    
+    # إعداد خلفية متدرجة
+    base_color = (245, 245, 245)  # فاتح
+    gradient_color = (220, 220, 220)
+    image = Image.new("RGB", (width, height), color=base_color)
+    draw = ImageDraw.Draw(image)
+    for y in range(height):
+        r = int(base_color[0] + (gradient_color[0]-base_color[0]) * y/height)
+        g = int(base_color[1] + (gradient_color[1]-base_color[1]) * y/height)
+        b = int(base_color[2] + (gradient_color[2]-base_color[2]) * y/height)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    
+    # خطوط
+    try:
+        font_title = ImageFont.truetype("arialbd.ttf", 32)
+        font_text = ImageFont.truetype("arial.ttf", 26)
+    except:
+        font_title = ImageFont.load_default()
+        font_text = ImageFont.load_default()
+    
+    # ألوان حسب الاتجاه
+    main_color = (0, 102, 204) if direction == "bullish" else (204, 0, 0)  # أزرق/أحمر
+    arrow = "📈" if direction == "bullish" else "📉"
+    main_direction_text = "صعودية" if direction == "bullish" else "هبوطية"
+    
+    sa_time = (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime("%H:%M:%S")
+    
+    # رسم المربعات الملونة للأقسام
+    draw.rectangle([10, 10, width-10, 70], fill=main_color)
+    draw.rectangle([10, 80, width-10, 80 + 40 + 35*len(signals_list)], outline=(0,0,0), width=2)
+    
+    # كتابة النصوص
+    y = 20
+    draw.text((20, y), f"{arrow} {symbol} - تأكيد إشارة {main_direction_text} قوية", fill="white", font=font_title)
+    y = 90
+    draw.text((20, y), "📊 الإشارات المختلفة:", fill="black", font=font_text)
+    y += 35
+    for sig in signals_list:
+        draw.text((40, y), f"• {sig}", fill="black", font=font_text)
+        y += 35
+    
+    draw.text((20, y), f"🔢 عدد الإشارات الكلي: {total_signals}", fill="black", font=font_text)
+    y += 35
+    draw.text((20, y), f"⏰ التوقيت السعودي: {sa_time}", fill="black", font=font_text)
+    y += 45
+    draw.text((20, y), f"متوقع حركة {main_direction_text} من {total_signals} إشارات مختلفة", fill=main_color, font=font_text)
+    
+    # حفظ الصورة في BytesIO
+    bio = io.BytesIO()
+    image.save(bio, format="PNG")
+    bio.seek(0)
+    return bio
+
+def send_telegram_image(image_bytes):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    files = {"photo": ("signal.png", image_bytes)}
+    data = {"chat_id": CHAT_ID}
+    try:
+        response = requests.post(url, files=files, data=data, timeout=15)
+        if response.status_code == 200:
+            print("✅ أرسلنا الصورة للتليجرام")
+        else:
+            print(f"⚠️ فشل ارسال الصورة ({response.status_code}): {response.text}")
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء ارسال الصورة: {e}")
+
 def process_signal(signal_text: str):
-    """
-    الإشارات المتوقعة من webhook تكون على شكل:
-    "Bullish reversal +\nBTCUSDT"
-    """
     lines = signal_text.strip().split("\n")
     if len(lines) < 2:
-        print("⚠️ الإشارة غير صالحة:", signal_text)
         return
-
     signal_name = lines[0].strip()
     symbol = lines[1].strip()
-
-    # تحديد الاتجاه
     direction = "bullish" if "bullish" in signal_name.lower() else "bearish"
-
-    # هاش فريد للإشارة
     signal_hash = hash_signal(signal_name)
-
-    # تحقق من التكرار
+    
     if signal_hash in signals_store[symbol][direction]:
-        print(f"⏭️ إشارة مكررة تجاهل: {signal_name} لـ {symbol}")
         return
-
-    # إضافة الإشارة لمخزن الإشارات
+    
     signals_store[symbol][direction][signal_hash] = signal_name
-    print(f"✅ خزّننا إشارة {direction} لـ {symbol}: {signal_name}")
-
-    # ===== تحقق من عدد الإشارات المختلفة بنفس الاتجاه =====
+    
     if len(signals_store[symbol][direction]) >= 2:
-        # جمع الإشارات المختلفة
         signals_list = list(signals_store[symbol][direction].values())
         total_signals = len(signals_list)
-
-        # توقيت سعودي
-        sa_time = (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime("%H:%M:%S")
-
-        # نص الرسالة النهائي
-        main_direction_text = "صعودي" if direction == "bullish" else "هبوطي"
-        emoji = "📈" if direction == "bullish" else "📉"
-
-        message = f"{emoji} {symbol} - تأكيد إشارة {main_direction_text} قوية\n\n"
-        message += "📊 الإشارات المختلفة:\n"
-        for sig in signals_list:
-            message += f"• {sig}\n"
-        message += f"\n🔢 عدد الإشارات الكلي: {total_signals}\n"
-        message += f"⏰ التوقيت السعودي: {sa_time}\n\n"
-        message += f"تأكيد {main_direction_text} قوي من {total_signals} إشارات مختلفة - متوقع حركة {main_direction_text}"
-
-        # ارسال للتليجرام
-        send_telegram(message)
-
-        # إعادة ضبط الإشارات بعد الإرسال
+        image_bytes = create_signal_image(symbol, direction, signals_list, total_signals)
+        send_telegram_image(image_bytes)
         signals_store[symbol][direction].clear()
 
-# ===== مسار webhook =====
 @app.route("/webhook", methods=["POST"])
 def webhook():
     signal_text = request.get_data(as_text=True)
-    print(f"🌐 طلب وارد: POST /webhook")
-    print(f"📨 بيانات webhook ({len(signal_text)} chars): {signal_text}")
     process_signal(signal_text)
     return jsonify({"status": "ok"}), 200
 
-# ===== تشغيل السيرفر =====
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
