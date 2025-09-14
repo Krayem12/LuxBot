@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # Saudi time settings (UTC+3)
 TIMEZONE_OFFSET = 3
-REQUIRED_CONFIRMATION_SIGNALS = 2  # إشارتين للتأكيد
+REQUIRED_CONFIRMATION_SIGNALS = 1  # إشارة واحدة للتأكيد (للتجربة)
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
@@ -128,24 +128,32 @@ def cleanup_signals():
     if cleanup_count > 0:
         print(f"🧹 Cleaned {cleanup_count} old signals")
 
-# Optimized symbol extraction
-_symbol_patterns = [
-    ("SPX", "SPX500"), ("500", "SPX500"),
-    ("BTC", "BTCUSDT"), ("ETH", "ETHUSDT"),
-    ("NASDAQ", "NASDAQ100"), ("100", "NASDAQ100"),
-    ("DOW", "US30"), ("US30", "US30"), ("30", "US30")
-]
-
+# Improved symbol extraction - detect 4-digit numbers as stock symbols
 def extract_symbol(message):
     message_upper = message.upper()
     
+    # First check for known symbols
     for symbol in STOCK_LIST:
         if symbol in message_upper:
             return symbol
     
-    for pattern, symbol in _symbol_patterns:
+    # Check for common patterns
+    symbol_patterns = [
+        ("SPX", "SPX500"), ("500", "SPX500"),
+        ("BTC", "BTCUSDT"), ("ETH", "ETHUSDT"),
+        ("NASDAQ", "NASDAQ100"), ("100", "NASDAQ100"),
+        ("DOW", "US30"), ("US30", "US30"), ("30", "US30")
+    ]
+    
+    for pattern, symbol in symbol_patterns:
         if pattern in message_upper:
             return symbol
+    
+    # NEW: Extract 4-digit numbers as stock symbols (like 1120, 2222, etc.)
+    number_matches = re.findall(r'\b\d{4}\b', message_upper)
+    if number_matches:
+        # Take the first 4-digit number found as the stock symbol
+        return number_matches[0]
     
     return "UNKNOWN"
 
@@ -156,15 +164,7 @@ def extract_clean_signal_name(raw_signal):
         return signal_cache[cache_key]['value']
     
     clean_signal = re.sub(r'_\d+\.\d+', '', raw_signal)
-    clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
-    
-    for symbol in STOCK_LIST:
-        clean_signal = clean_signal.replace(symbol, '').replace(symbol.lower(), '')
-    
-    for pattern, symbol in _symbol_patterns:
-        clean_signal = clean_signal.replace(pattern, '').replace(pattern.lower(), '')
-    
-    clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
+    clean_signal = re.sub(r'\b\d{4}\b', '', clean_signal)  # Remove 4-digit stock numbers
     clean_signal = re.sub(r'\s+', ' ', clean_signal).strip()
     
     result = clean_signal if clean_signal else "Unknown Signal"
@@ -215,56 +215,50 @@ def process_trend_signal(symbol, signal_text, direction):
         return True
     return False
 
-# Process confirmation signals
+# Process confirmation signals - NOW ONLY 1 SIGNAL REQUIRED
 def process_confirmation_signals(symbol, direction):
     signals = signal_memory[symbol][direction]
     
     if len(signals) >= REQUIRED_CONFIRMATION_SIGNALS:
-        # Check if signals are different
-        unique_signals = set()
-        for sig, ts in signals:
-            clean_signal = extract_clean_signal_name(sig)
-            unique_signals.add(clean_signal)
+        # With only 1 signal required, we don't need to check for uniqueness
+        saudi_time = get_saudi_time()
+        signal_count = len(signals)
         
-        if len(unique_signals) >= REQUIRED_CONFIRMATION_SIGNALS:
-            # Check if confirmation matches current trend
-            if (direction == "bullish" and last_trend_direction == "bullish") or \
-               (direction == "bearish" and last_trend_direction == "bearish"):
-                
-                saudi_time = get_saudi_time()
-                signal_count = len(signals)
-                
-                if direction == "bullish":
-                    message = f"""🚀 <b>{symbol} - تأكيد دخول صعودي</b>
+        # Get the clean signal name from the latest signal
+        latest_signal, latest_ts = signals[-1]
+        clean_signal = extract_clean_signal_name(latest_signal)
+        
+        # Check if confirmation matches current trend
+        if (direction == "bullish" and last_trend_direction == "bullish") or \
+           (direction == "bearish" and last_trend_direction == "bearish"):
+            
+            if direction == "bullish":
+                message = f"""🚀 <b>{symbol} - تأكيد دخول صعودي</b>
 
-📊 <b>الإشارات التأكيدية:</b>
-{chr(10).join([f'• {signal}' for signal in list(unique_signals)[:REQUIRED_CONFIRMATION_SIGNALS]])}
-
+🎯 <b>الإشارة التأكيدية:</b> {clean_signal}
 🔢 <b>عدد الإشارات:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
 <code>تأكيد دخول صعودي مع الاتجاه العام - متوقع حركة صعودية</code>"""
-                else:
-                    message = f"""📉 <b>{symbol} - تأكيد دخول هبوطي</b>
+            else:
+                message = f"""📉 <b>{symbol} - تأكيد دخول هبوطي</b>
 
-📊 <b>الإشارات التأكيدية:</b>
-{chr(10).join([f'• {signal}' for signal in list(unique_signals)[:REQUIRED_CONFIRMATION_SIGNALS]])}
-
+🎯 <b>الإشارة التأكيدية:</b> {clean_signal}
 🔢 <b>عدد الإشارات:</b> {signal_count}
 ⏰ <b>التوقيت السعودي:</b> {saudi_time}
 
 <code>تأكيد دخول هبوطي مع الاتجاه العام - متوقع حركة هبوطية</code>"""
-                
-                telegram_success = send_telegram_to_all(message)
-                external_success = send_post_request(message, "CONFIRMATION_SIGNALS", 
-                                                   "BULLISH_CONFIRMATION" if direction == "bullish" else "BEARISH_CONFIRMATION")
-                
-                if telegram_success:
-                    print(f"🎉 Confirmation alert sent for {symbol} ({direction})")
-                
-                # Clear confirmation signals after sending
-                signal_memory[symbol][direction] = []
-                return True
+            
+            telegram_success = send_telegram_to_all(message)
+            external_success = send_post_request(message, "CONFIRMATION_SIGNALS", 
+                                               "BULLISH_CONFIRMATION" if direction == "bullish" else "BEARISH_CONFIRMATION")
+            
+            if telegram_success:
+                print(f"🎉 Confirmation alert sent for {symbol} ({direction})")
+            
+            # Clear confirmation signals after sending
+            signal_memory[symbol][direction] = []
+            return True
     
     return False
 
