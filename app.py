@@ -63,7 +63,7 @@ def load_stocks():
         with open('stocks.txt', 'r') as f:
             stocks = [line.strip().upper() for line in f if line.strip()]
     except FileNotFoundError:
-        stocks = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30", "V", "AAPL", "TSLA", "XAUUSD", "XAGUSD", "USOIL"]
+        stocks = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30", "XAUUSD", "XAGUSD", "USOIL"]
     
     _stock_list_cache = stocks
     _stock_list_cache_time = time.time()
@@ -155,6 +155,11 @@ def handle_short_symbols(message, extracted_symbol):
         "X": ["XEROX", "XBOX", "XILINX"]
     }
     
+    # إذا كان الرمز قصيراً وليس في قائمة الرموز القصيرة المعروفة
+    if len(extracted_symbol) <= 2 and extracted_symbol not in short_symbols:
+        print(f"   ⚠️  رمز قصير غير معروف: {extracted_symbol} - سيتم تجاهله")
+        return "UNKNOWN"
+    
     if extracted_symbol in short_symbols:
         contexts = short_symbols[extracted_symbol]
         # إذا كان الرمز قصيراً، نتأكد من وجود السياق
@@ -162,7 +167,8 @@ def handle_short_symbols(message, extracted_symbol):
         
         if not has_context:
             # إذا لا يوجد سياق، نعتبره غير معروف
-            return "UNKNOWN_STOCK"
+            print(f"   ⚠️  لا يوجد سياق للرمز القصير: {extracted_symbol} - سيتم تجاهله")
+            return "UNKNOWN"
     
     return extracted_symbol
 
@@ -170,32 +176,15 @@ def handle_short_symbols(message, extracted_symbol):
 def extract_symbol(message):
     message_upper = message.upper()
     
-    # القائمة الكاملة للرموز وسياقاتها
-    symbol_patterns = {
-        "V": ["VISA", "CREDIT CARD", "PAYMENT", "FINANCIAL"],
-        "AAPL": ["APPLE", "IPHONE", "MAC", "TECH"],
-        "TSLA": ["TESLA", "ELECTRIC CAR", "EV", "MUSK"],
-        "SPX500": ["SPX", "500", "S&P", "INDEX"],
-        "NASDAQ100": ["NASDAQ", "100", "TECH INDEX"],
-        "US30": ["DOW", "US30", "30", "DOW JONES"],
-        "BTCUSDT": ["BITCOIN", "BTC", "CRYPTO"],
-        "ETHUSDT": ["ETHEREUM", "ETH", "CRYPTO"],
-        "USOIL": ["OIL", "CRUDE", "PETROLEUM", "WTI"],
-        "XAUUSD": ["GOLD", "XAU", "PRECIOUS METAL"],
-        "XAGUSD": ["SILVER", "XAG", "PRECIOUS METAL"]
-    }
-    
-    # البحث أولاً بالرموز المباشرة مع حدود الكلمات
+    # البحث الدقيق بالرموز مع حدود الكلمات
     for symbol in STOCK_LIST:
+        # استخدام regex للتأكد من أن الرمز ليس جزءاً من كلمة أخرى
         if re.search(r'\b' + re.escape(symbol) + r'\b', message_upper):
+            print(f"   ✅ تم العثور على الرمز: {symbol} في الرسالة")
             return symbol
     
-    # ثم البحث بالسياق
-    for symbol, contexts in symbol_patterns.items():
-        for context in contexts:
-            if context in message_upper:
-                return symbol
-    
+    # إذا لم يتم العثور على أي رمز
+    print(f"   ⚠️  لم يتم العثور على أي رمز في الرسالة: {message_upper}")
     return "UNKNOWN"
 
 # تحسين تنظيف اسم الإشارة
@@ -207,20 +196,16 @@ def extract_clean_signal_name(raw_signal):
     if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
         return signal_cache[cache_key]['value']
     
+    # أولاً، إزالة أي رموز أسهم معروفة
+    clean_signal = raw_signal.upper()
+    for symbol in STOCK_LIST:
+        clean_signal = clean_signal.replace(symbol, '')
+    
     # إزالة الطوابع الزمنية
-    clean_signal = re.sub(r'_\d+\.\d+', '', raw_signal)
+    clean_signal = re.sub(r'_\d+\.\d+', '', clean_signal)
     
     # إزالة الأرقام
     clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
-    
-    # إزالة رموز الأسهم من نص الإشارة
-    for symbol in STOCK_LIST:
-        clean_signal = clean_signal.replace(symbol, '').replace(symbol.lower(), '')
-    
-    # إزالة الأنماط المعروفة
-    patterns_to_remove = ["SPX", "500", "BTC", "ETH", "NASDAQ", "100", "DOW", "US30", "30", "V", "AAPL", "TSLA"]
-    for pattern in patterns_to_remove:
-        clean_signal = clean_signal.replace(pattern, '').replace(pattern.lower(), '')
     
     # إزالة الأحرف Unicode الخاصة
     clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
@@ -245,8 +230,9 @@ def get_current_signals_info(symbol, direction):
     signal_details = []
     for sig, ts in signals:
         clean_signal = extract_clean_signal_name(sig)
-        unique_signals.add(clean_signal)
-        signal_details.append((clean_signal, ts))
+        if clean_signal and clean_signal != "إشارة غير معروفة":
+            unique_signals.add(clean_signal)
+            signal_details.append((clean_signal, ts))
     
     signal_count = len(signals)
     unique_count = len(unique_signals)
@@ -272,7 +258,8 @@ def has_required_different_signals(signals_list):
     unique_signals = set()
     for sig, ts in signals_list:
         clean_signal = extract_clean_signal_name(sig)
-        unique_signals.add(clean_signal)
+        if clean_signal and clean_signal != "إشارة غير معروفة":
+            unique_signals.add(clean_signal)
         if len(unique_signals) >= REQUIRED_SIGNALS:
             return True, list(unique_signals)
     
@@ -293,12 +280,24 @@ def process_alerts(alerts):
         if not signal:
             continue
 
+        message_upper = signal.upper()
+        print(f"🔍 تحليل الرسالة: '{signal}'")
+        
         if not ticker or ticker == "UNKNOWN":
             ticker = extract_symbol(signal)
+            print(f"   الرمز المستخرج: {ticker}")
+            
+        # منع التعيين التلقائي لرموز غير موجودة في الرسالة
+        if ticker != "UNKNOWN" and ticker not in message_upper:
+            print(f"   ⚠️  الرمز {ticker} غير موجود في الرسالة - سيتم تجاهله")
+            ticker = "UNKNOWN"
             
         # معالجة الرموز القصيرة
         if len(ticker) <= 2 and ticker != "UNKNOWN":
+            old_ticker = ticker
             ticker = handle_short_symbols(signal, ticker)
+            if ticker != old_ticker:
+                print(f"   تم تغيير الرمز من {old_ticker} إلى {ticker}")
 
         if ticker == "UNKNOWN":
             context = analyze_message_context(signal)
