@@ -19,6 +19,8 @@ CHAT_ID = "624881400"
 # ذاكرة مؤقتة للإشارات المعالجة
 signal_cache = {}
 CACHE_TIMEOUT = 300
+request_cache = {}
+CACHE_DURATION = 30  # ثانية
 
 # الحصول على التوقيت السعودي بشكل محسن
 def get_saudi_time():
@@ -61,7 +63,7 @@ def load_stocks():
         with open('stocks.txt', 'r') as f:
             stocks = [line.strip().upper() for line in f if line.strip()]
     except FileNotFoundError:
-        stocks = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30"]
+        stocks = ["BTCUSDT", "ETHUSDT", "SPX500", "NASDAQ100", "US30", "V", "AAPL", "TSLA", "XAUUSD", "XAGUSD", "USOIL"]
     
     _stock_list_cache = stocks
     _stock_list_cache_time = time.time()
@@ -119,29 +121,88 @@ def cleanup_signals():
     if cleanup_count > 0:
         print(f"🧹 تم تنظيف {cleanup_count} إشارة قديمة")
 
-# استخراج الرمز بشكل محسن
-_symbol_patterns = [
-    ("SPX", "SPX500"), ("500", "SPX500"),
-    ("BTC", "BTCUSDT"), ("ETH", "ETHUSDT"),
-    ("NASDAQ", "NASDAQ100"), ("100", "NASDAQ100"),
-    ("DOW", "US30"), ("US30", "US30"), ("30", "US30")
-]
+# تحليل سياق الرسالة
+def analyze_message_context(message):
+    """تحليل تلقائي لسياق الرسالة"""
+    message_lower = message.lower()
+    
+    context_hints = {
+        "TECH": ["tech", "software", "iphone", "mac", "computer", "apple"],
+        "FINANCIAL": ["bank", "credit", "payment", "financial", "visa", "mastercard"],
+        "ENERGY": ["oil", "gas", "energy", "petroleum", "crude", "brent"],
+        "CRYPTO": ["crypto", "bitcoin", "ethereum", "blockchain", "btc", "eth"],
+        "INDEX": ["index", "spx", "nasdaq", "dow", "s&p", "500"],
+        "METALS": ["gold", "silver", "xau", "xag", "metal", "precious"],
+        "RETAIL": ["retail", "store", "shop", "consumer", "amazon", "walmart"]
+    }
+    
+    for context, keywords in context_hints.items():
+        if any(keyword in message_lower for keyword in keywords):
+            return context
+    
+    return "GENERAL"
 
+# معالجة الرموز القصيرة
+def handle_short_symbols(message, extracted_symbol):
+    """معالجة خاصة للرموز القصيرة التي يمكن أن تكون جزءاً من كلمات أخرى"""
+    message_upper = message.upper()
+    
+    short_symbols = {
+        "V": ["VISA", "CREDIT", "PAYMENT", "FINANCIAL", "BANK"],
+        "M": ["MACY", "MARKET", "MORNING", "MACYS"],
+        "C": ["CITI", "CITIGROUP", "CREDIT", "BANK"],
+        "T": ["AT&T", "TELE", "TECH", "TELEPHONE", "TMOBILE"],
+        "X": ["XEROX", "XBOX", "XILINX"]
+    }
+    
+    if extracted_symbol in short_symbols:
+        contexts = short_symbols[extracted_symbol]
+        # إذا كان الرمز قصيراً، نتأكد من وجود السياق
+        has_context = any(context in message_upper for context in contexts)
+        
+        if not has_context:
+            # إذا لا يوجد سياق، نعتبره غير معروف
+            return "UNKNOWN_STOCK"
+    
+    return extracted_symbol
+
+# استخراج الرمز بشكل محسن مع السياق
 def extract_symbol(message):
     message_upper = message.upper()
     
+    # القائمة الكاملة للرموز وسياقاتها
+    symbol_patterns = {
+        "V": ["VISA", "CREDIT CARD", "PAYMENT", "FINANCIAL"],
+        "AAPL": ["APPLE", "IPHONE", "MAC", "TECH"],
+        "TSLA": ["TESLA", "ELECTRIC CAR", "EV", "MUSK"],
+        "SPX500": ["SPX", "500", "S&P", "INDEX"],
+        "NASDAQ100": ["NASDAQ", "100", "TECH INDEX"],
+        "US30": ["DOW", "US30", "30", "DOW JONES"],
+        "BTCUSDT": ["BITCOIN", "BTC", "CRYPTO"],
+        "ETHUSDT": ["ETHEREUM", "ETH", "CRYPTO"],
+        "USOIL": ["OIL", "CRUDE", "PETROLEUM", "WTI"],
+        "XAUUSD": ["GOLD", "XAU", "PRECIOUS METAL"],
+        "XAGUSD": ["SILVER", "XAG", "PRECIOUS METAL"]
+    }
+    
+    # البحث أولاً بالرموز المباشرة مع حدود الكلمات
     for symbol in STOCK_LIST:
-        if symbol in message_upper:
+        if re.search(r'\b' + re.escape(symbol) + r'\b', message_upper):
             return symbol
     
-    for pattern, symbol in _symbol_patterns:
-        if pattern in message_upper:
-            return symbol
+    # ثم البحث بالسياق
+    for symbol, contexts in symbol_patterns.items():
+        for context in contexts:
+            if context in message_upper:
+                return symbol
     
     return "UNKNOWN"
 
-# تحسين تنظيف اسم الإشارة - إزالة رموز الأسهم والطوابع الزمنية
+# تحسين تنظيف اسم الإشارة
 def extract_clean_signal_name(raw_signal):
+    if not raw_signal or len(raw_signal.strip()) < 2:
+        return "إشارة غير واضحة"
+    
     cache_key = f"signal_{hash(raw_signal)}"
     if cache_key in signal_cache and time.time() - signal_cache[cache_key]['time'] < CACHE_TIMEOUT:
         return signal_cache[cache_key]['value']
@@ -150,17 +211,18 @@ def extract_clean_signal_name(raw_signal):
     clean_signal = re.sub(r'_\d+\.\d+', '', raw_signal)
     
     # إزالة الأرقام
-    clean_signal = re.sub(r'\b\d+\b', '', raw_signal)
+    clean_signal = re.sub(r'\b\d+\b', '', clean_signal)
     
     # إزالة رموز الأسهم من نص الإشارة
     for symbol in STOCK_LIST:
         clean_signal = clean_signal.replace(symbol, '').replace(symbol.lower(), '')
     
     # إزالة الأنماط المعروفة
-    for pattern, symbol in _symbol_patterns:
+    patterns_to_remove = ["SPX", "500", "BTC", "ETH", "NASDAQ", "100", "DOW", "US30", "30", "V", "AAPL", "TSLA"]
+    for pattern in patterns_to_remove:
         clean_signal = clean_signal.replace(pattern, '').replace(pattern.lower(), '')
     
-    # إزالة الأحرف Unicode الخاصة (مثل العلامات الاتجاهية)
+    # إزالة الأحرف Unicode الخاصة
     clean_signal = re.sub(r'[\u200e\u200f\u202a-\u202e]', '', clean_signal)
     
     # تنظيف المسافات الإضافية والتقليم
@@ -223,7 +285,7 @@ def process_alerts(alerts):
     for alert in alerts:
         if isinstance(alert, dict):
             signal = alert.get("signal", alert.get("message", "")).strip()
-            ticker = alert.get("ticker", "")
+            ticker = alert.get("ticker", "").strip().upper()
         else:
             signal = str(alert).strip()
             ticker = ""
@@ -233,12 +295,19 @@ def process_alerts(alerts):
 
         if not ticker or ticker == "UNKNOWN":
             ticker = extract_symbol(signal)
+            
+        # معالجة الرموز القصيرة
+        if len(ticker) <= 2 and ticker != "UNKNOWN":
+            ticker = handle_short_symbols(signal, ticker)
 
         if ticker == "UNKNOWN":
+            context = analyze_message_context(signal)
+            print(f"⚠️  لم يتم التعرف على الرمز: {signal}")
+            print(f"   السياق: {context}")
             continue
 
         signal_lower = signal.lower()
-        direction = "bearish" if any(word in signal_lower for word in ["bearish", "down", "put", "short"]) else "bullish"
+        direction = "bearish" if any(word in signal_lower for word in ["bearish", "down", "put", "short", "sell"]) else "bullish"
 
         if ticker not in signal_memory:
             signal_memory[ticker] = {"bullish": [], "bearish": []}
@@ -249,9 +318,11 @@ def process_alerts(alerts):
         
         current_signals.append((signal, datetime.utcnow()))
         
-        # تسجيل كل إشارة مخزنة مع الاسم النظيف
+        # تسجيل مفصل
         clean_signal_name = extract_clean_signal_name(signal)
+        context = analyze_message_context(signal)
         print(f"✅ تم تخزين إشارة {direction} لـ {ticker}: {clean_signal_name}")
+        print(f"   السياق: {context}")
 
     # التنظيف الدوري
     if random.random() < 0.3:
@@ -262,7 +333,6 @@ def process_alerts(alerts):
         for direction in ["bullish", "bearish"]:
             signal_count = len(signals[direction])
             if signal_count > 0:
-                # دائمًا عرض التقدم، ليس فقط عند الانتظار
                 signals_info = get_current_signals_info(symbol, direction)
                 has_required, unique_signals = has_required_different_signals(signals[direction])
                 
@@ -319,6 +389,21 @@ def log_request_info():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
+        # التحقق من الطلبات المكررة
+        request_hash = hash(request.get_data())
+        current_time = time.time()
+        
+        if request_hash in request_cache:
+            if current_time - request_cache[request_hash] < CACHE_DURATION:
+                print("🔄 تخطي الطلب المكرر")
+                return jsonify({"status": "duplicate_skipped"}), 200
+        
+        request_cache[request_hash] = current_time
+        # تنظيف ذاكرة التخزين المؤقت القديمة
+        for key in list(request_cache.keys()):
+            if current_time - request_cache[key] > CACHE_DURATION * 2:
+                del request_cache[key]
+                
         alerts = []
         raw_data = None
 
@@ -326,6 +411,8 @@ def webhook():
         try:
             raw_data = request.get_data(as_text=True).strip()
             print(f"📨 تم استقبال بيانات webhook الخام: '{raw_data}'")
+            print(f"📦 طول البيانات: {len(raw_data)} حرف")
+            print(f"🔍 أول 100 حرف: {raw_data[:100]}{'...' if len(raw_data) > 100 else ''}")
             
             # محاولة تحليل JSON
             if raw_data and raw_data.startswith('{') and raw_data.endswith('}'):
