@@ -15,7 +15,8 @@ CHAT_ID = "624881400"
 
 # ===== إعداد تخزين الإشارات =====
 # signals_store: لتخزين جميع الإشارات الفريدة لكل زوج حسب الاتجاه
-signals_store = defaultdict(lambda: {"bullish": set(), "bearish": set()})
+# الآن نخزن كائن يحتوي على "hash" و "text"
+signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
 
 # ===== دالة ارسال رسالة للتليجرام =====
 def send_telegram(message: str):
@@ -59,19 +60,16 @@ def process_signal(signal_text: str):
         print(f"⏭️ إشارة مكررة تجاهل: {signal_name} لـ {symbol}")
         return
 
-    # إضافة الإشارة لمخزن الإشارات
-    signals_store[symbol][direction].add(signal_hash)
+    # إضافة الإشارة لمخزن الإشارات (نخزن الهاش مع النص)
+    signals_store[symbol][direction][signal_hash] = signal_name
     print(f"✅ خزّننا إشارة {direction} لـ {symbol}: {signal_name}")
 
     # ===== تحقق من عدد الإشارات المختلفة بنفس الاتجاه =====
     if len(signals_store[symbol][direction]) >= 2:
-        # جمع الإشارتين المختلفتين بنفس الاتجاه
-        combined_signals = "\n".join(
-            [s for s_hash in signals_store[symbol][direction] for s in [signal_name]]
-        )
-        message = f"⚡️ إشارات {direction.upper()} مجمعة لـ {symbol}:\n" + \
-                  "\n".join([s for s_hash in signals_store[symbol][direction] for s in [s_hash]])
-        
+        # جمع الإشارات المختلفة بنفس الاتجاه
+        combined_signals = "\n".join(signals_store[symbol][direction].values())
+        message = f"⚡️ إشارات {direction.upper()} مجمعة لـ {symbol}:\n{combined_signals}"
+
         # ارسال للتليجرام
         send_telegram(message)
 
