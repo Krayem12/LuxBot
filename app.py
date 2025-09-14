@@ -14,18 +14,17 @@ TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 CHAT_ID = "624881400"
 
 # ===== إعداد تخزين الإشارات =====
-# signals_store: لتخزين جميع الإشارات الفريدة لكل زوج حسب الاتجاه
-# الآن نخزن كائن يحتوي على "hash" و "text"
+# نخزن النصوص مع الهاش للتحقق من التكرار
 signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
 
 # ===== دالة ارسال رسالة للتليجرام =====
 def send_telegram(message: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
         response = requests.post(url, data=payload, timeout=10)
         if response.status_code == 200:
-            print(f"✅ أرسلنا للتليجرام: {message}")
+            print(f"✅ أرسلنا للتليجرام")
         else:
             print(f"⚠️ فشل ارسال التليجرام ({response.status_code}): {response.text}")
     except Exception as e:
@@ -60,20 +59,35 @@ def process_signal(signal_text: str):
         print(f"⏭️ إشارة مكررة تجاهل: {signal_name} لـ {symbol}")
         return
 
-    # إضافة الإشارة لمخزن الإشارات (نخزن الهاش مع النص)
+    # إضافة الإشارة لمخزن الإشارات
     signals_store[symbol][direction][signal_hash] = signal_name
     print(f"✅ خزّننا إشارة {direction} لـ {symbol}: {signal_name}")
 
     # ===== تحقق من عدد الإشارات المختلفة بنفس الاتجاه =====
     if len(signals_store[symbol][direction]) >= 2:
-        # جمع الإشارات المختلفة بنفس الاتجاه
-        combined_signals = "\n".join(signals_store[symbol][direction].values())
-        message = f"⚡️ إشارات {direction.upper()} مجمعة لـ {symbol}:\n{combined_signals}"
+        # جمع الإشارات المختلفة
+        signals_list = list(signals_store[symbol][direction].values())
+        total_signals = len(signals_list)
+
+        # توقيت سعودي
+        sa_time = (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).strftime("%H:%M:%S")
+
+        # نص الرسالة النهائي
+        main_direction_text = "صعودي" if direction == "bullish" else "هبوطي"
+        emoji = "📈" if direction == "bullish" else "📉"
+
+        message = f"{emoji} {symbol} - تأكيد إشارة {main_direction_text} قوية\n\n"
+        message += "📊 الإشارات المختلفة:\n"
+        for sig in signals_list:
+            message += f"• {sig}\n"
+        message += f"\n🔢 عدد الإشارات الكلي: {total_signals}\n"
+        message += f"⏰ التوقيت السعودي: {sa_time}\n\n"
+        message += f"تأكيد {main_direction_text} قوي من {total_signals} إشارات مختلفة - متوقع حركة {main_direction_text}"
 
         # ارسال للتليجرام
         send_telegram(message)
 
-        # إعادة ضبط الإشارات بعد الإرسال لتفادي التكرار
+        # إعادة ضبط الإشارات بعد الإرسال
         signals_store[symbol][direction].clear()
 
 # ===== مسار webhook =====
