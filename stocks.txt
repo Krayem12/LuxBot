@@ -16,7 +16,7 @@ NASDAQ100
 US30
 RUSSELL2000
 DXY
-
+SPX
 # الأسهم الأمريكية
 AAPL
 MSFT
@@ -140,4 +140,5 @@ TASI
 TASI
 Al Rajhi Bank
 alrajhi
+
 
