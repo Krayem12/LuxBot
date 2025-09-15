@@ -37,7 +37,8 @@ def hash_signal(signal_text: str):
 
 # ===== دالة استخراج الرمز =====
 def extract_symbol(text: str) -> str:
-    match = re.search(r"\b[A-Z]{3,10}USDT\b", text)
+    # يدعم: BTCUSDT, ETHUSDT, SPX, SPX500, NAS100, DJ30
+    match = re.search(r"\b([A-Z]{2,10}\d{0,3})(USDT)?\b", text)
     return match.group(0) if match else "UNKNOWN"
 
 # ===== دالة معالجة الإشارة =====
@@ -75,6 +76,10 @@ def process_signal(signal_text: str):
         direction = "bearish"
     elif "Oversold Hyper Wave" in signal_text:
         direction = "bullish"
+    elif "Hyper Wave oscillator upward signal" in signal_text:
+        direction = "bullish"
+    elif "Hyper Wave oscillator downward signal" in signal_text:
+        direction = "bearish"
 
     if not direction:
         print("ℹ️ إشارة غير مصنفة:", signal_text)
@@ -121,7 +126,7 @@ def process_signal(signal_text: str):
 def webhook():
     signal_text = request.get_data(as_text=True)
     print(f"🌐 طلب وارد: POST /webhook")
-    print(f"📨 بيانات webhook ({len(signal_text)} chars): {signal_text})")
+    print(f"📨 بيانات webhook ({len(signal_text)} chars): {signal_text}")
     process_signal(signal_text)
     return jsonify({"status": "ok"}), 200
 
