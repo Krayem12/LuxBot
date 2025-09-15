@@ -37,7 +37,6 @@ def hash_signal(signal_text: str):
 
 # ===== دالة استخراج الرمز =====
 def extract_symbol(text: str) -> str:
-    # يدعم: BTCUSDT, ETHUSDT, SPX, SPX500, NAS100, DJ30
     match = re.search(r"\b([A-Z]{2,10}\d{0,3})(USDT)?\b", text)
     return match.group(0) if match else "UNKNOWN"
 
@@ -45,6 +44,7 @@ def extract_symbol(text: str) -> str:
 def process_signal(signal_text: str):
     signal_text = signal_text.replace("\n", " ").strip()
     symbol = extract_symbol(signal_text)
+    sa_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
 
     # ===== تحديد الاتجاه العام Trend Catcher =====
     trend_catcher = None
@@ -57,12 +57,16 @@ def process_signal(signal_text: str):
         prev_trend = general_trend.get(symbol)
         if prev_trend != trend_catcher:
             general_trend[symbol] = trend_catcher
-            sa_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%H:%M:%S")
             emoji = "🟢📈" if trend_catcher == "bullish" else "🔴📉"
-            message = f"{emoji} {symbol}\n📊 الاتجاه العام تغير من {prev_trend or 'N/A'} → {trend_catcher}\n⏰ التوقيت السعودي: {sa_time}"
+            message = (
+                f"{emoji} {symbol}\n"
+                f"📊 الاتجاه العام تغير من {prev_trend or 'N/A'} → {trend_catcher}\n"
+                f"📨 الإشارة: {signal_text}\n"
+                f"⏰ وقت الاستلام (السعودي): {sa_time}"
+            )
             send_telegram(message)
             print(f"⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
-        return  # بعد حفظ الاتجاه العام نتوقف هنا
+        return
 
     # ===== تحديد اتجاه الإشارة العادية =====
     direction = None
@@ -102,11 +106,19 @@ def process_signal(signal_text: str):
     signals_store[symbol][direction][signal_hash] = signal_text
     print(f"✅ خزّننا إشارة {direction} لـ {symbol}: {signal_text}")
 
+    # ===== إرسال رسالة مباشرة للإشارة المستلمة =====
+    emoji = "🔵📈" if direction == "bullish" else "🔴📉"
+    message = (
+        f"{emoji} {symbol}\n"
+        f"📨 الإشارة: {signal_text}\n"
+        f"⏰ وقت الاستلام (السعودي): {sa_time}"
+    )
+    send_telegram(message)
+
     # ===== تحقق من عدد الإشارات المختلفة بنفس الاتجاه =====
     if len(signals_store[symbol][direction]) >= 3:
         signals_list = list(signals_store[symbol][direction].values())
         total_signals = len(signals_list)
-        sa_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%H:%M:%S")
         color_emoji = "🔵" if direction == "bullish" else "🔴"
         arrow_emoji = "📈" if direction == "bullish" else "📉"
 
@@ -115,7 +127,7 @@ def process_signal(signal_text: str):
         for sig in signals_list:
             message += f"• {sig}\n"
         message += f"\n🔢 عدد الإشارات الكلي: {total_signals}\n"
-        message += f"⏰ التوقيت السعودي: {sa_time}\n\n"
+        message += f"⏰ وقت الاستلام (السعودي): {sa_time}\n\n"
         message += f"{color_emoji} متوقع حركة {direction} من {total_signals} إشارات مختلفة"
 
         send_telegram(message)
@@ -125,8 +137,12 @@ def process_signal(signal_text: str):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     signal_text = request.get_data(as_text=True)
+    sa_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
+
     print(f"🌐 طلب وارد: POST /webhook")
+    print(f"⏰ وقت الاستلام (السعودي): {sa_time}")
     print(f"📨 بيانات webhook ({len(signal_text)} chars): {signal_text}")
+
     process_signal(signal_text)
     return jsonify({"status": "ok"}), 200
 
