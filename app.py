@@ -18,6 +18,18 @@ CHAT_ID = "624881400"
 signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
 general_trend = {}  # الاتجاه العام لكل رمز
 
+# ===== تحميل قائمة الأسهم المسموح بها من ملف =====
+def load_allowed_stocks(file_path="stocks.txt"):
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            # كل سطر يمثل رمز سهم، نتخلص من الفراغات
+            return set(line.strip().upper() for line in f if line.strip())
+    except FileNotFoundError:
+        print(f"⚠️ ملف الأسهم {file_path} غير موجود!")
+        return set()
+
+ALLOWED_STOCKS = load_allowed_stocks()
+
 # ===== دالة ارسال رسالة للتليجرام =====
 def send_telegram(message: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -35,38 +47,44 @@ def send_telegram(message: str):
 def hash_signal(signal_text: str):
     return hashlib.sha256(signal_text.encode()).hexdigest()
 
-# ===== دالة استخراج الرمز =====
+# ===== دالة استخراج الرمز مع التحقق من الأسهم المسموح بها =====
 def extract_symbol(text: str) -> str:
     match = re.search(r"\b([A-Z]{2,10}\d{0,3})(USDT)?\b", text)
-    return match.group(0) if match else "UNKNOWN"
+    if match:
+        symbol = match.group(0).upper()
+        if symbol in ALLOWED_STOCKS:
+            return symbol
+    return "UNKNOWN"
 
 # ===== دالة معالجة الإشارة =====
 def process_signal(signal_text: str):
     signal_text = signal_text.replace("\n", " ").strip()
     symbol = extract_symbol(signal_text)
+
+    # 🕒 التوقيت السعودي
     sa_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
 
+    if symbol == "UNKNOWN":
+        print(f"⏭️ تجاهل إشارة لأن الرمز غير موجود في ملف الأسهم ⏰ {sa_time}: {signal_text}")
+        return
+
     # ===== تحديد الاتجاه العام Trend Catcher =====
-    trend_catcher = None
     if "Trend Catcher Bullish" in signal_text:
         trend_catcher = "bullish"
     elif "Trend Catcher Bearish" in signal_text:
         trend_catcher = "bearish"
+    else:
+        trend_catcher = None
 
-    if trend_catcher:
+    if trend_catcher:  # اتجاه عام فقط
         prev_trend = general_trend.get(symbol)
         if prev_trend != trend_catcher:
             general_trend[symbol] = trend_catcher
             emoji = "🟢📈" if trend_catcher == "bullish" else "🔴📉"
-            message = (
-                f"{emoji} {symbol}\n"
-                f"📊 الاتجاه العام تغير من {prev_trend or 'N/A'} → {trend_catcher}\n"
-                f"📨 الإشارة: {signal_text}\n"
-                f"⏰ وقت الاستلام (السعودي): {sa_time}"
-            )
+            message = f"{emoji} {symbol}\n📊 الاتجاه العام تغير من {prev_trend or 'N/A'} → {trend_catcher}\n⏰ {sa_time}"
             send_telegram(message)
             print(f"⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
-        return
+        return  # 🛑 إيقاف هنا — ما يعتبر إشارة دخول
 
     # ===== تحديد اتجاه الإشارة العادية =====
     direction = None
@@ -86,12 +104,12 @@ def process_signal(signal_text: str):
         direction = "bearish"
 
     if not direction:
-        print("ℹ️ إشارة غير مصنفة:", signal_text)
+        print(f"ℹ️ إشارة غير مصنفة ⏰ {sa_time}: {signal_text}")
         return
 
     # ===== التحقق من توافق الاتجاه مع Trend Catcher =====
     if symbol in general_trend and direction != general_trend[symbol]:
-        print(f"⏭️ تجاهل إشارة {signal_text} لأنها لا تتوافق مع الاتجاه العام {general_trend[symbol]}")
+        print(f"⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنها لا تتوافق مع الاتجاه العام {general_trend[symbol]} ⏰ {sa_time}")
         return
 
     # ===== هاش فريد للإشارة =====
@@ -99,21 +117,12 @@ def process_signal(signal_text: str):
 
     # ===== تحقق من التكرار =====
     if signal_hash in signals_store[symbol][direction]:
-        print(f"⏭️ إشارة مكررة تجاهل: {signal_text} لـ {symbol}")
+        print(f"⏭️ إشارة مكررة تجاهل ⏰ {sa_time}: {signal_text} لـ {symbol}")
         return
 
     # ===== إضافة الإشارة لمخزن الإشارات =====
     signals_store[symbol][direction][signal_hash] = signal_text
-    print(f"✅ خزّننا إشارة {direction} لـ {symbol}: {signal_text}")
-
-    # ===== إرسال رسالة مباشرة للإشارة المستلمة =====
-    emoji = "🔵📈" if direction == "bullish" else "🔴📉"
-    message = (
-        f"{emoji} {symbol}\n"
-        f"📨 الإشارة: {signal_text}\n"
-        f"⏰ وقت الاستلام (السعودي): {sa_time}"
-    )
-    send_telegram(message)
+    print(f"✅ خزّننا إشارة {direction} لـ {symbol} ⏰ {sa_time}: {signal_text}")
 
     # ===== تحقق من عدد الإشارات المختلفة بنفس الاتجاه =====
     if len(signals_store[symbol][direction]) >= 3:
@@ -127,7 +136,7 @@ def process_signal(signal_text: str):
         for sig in signals_list:
             message += f"• {sig}\n"
         message += f"\n🔢 عدد الإشارات الكلي: {total_signals}\n"
-        message += f"⏰ وقت الاستلام (السعودي): {sa_time}\n\n"
+        message += f"⏰ {sa_time}\n\n"
         message += f"{color_emoji} متوقع حركة {direction} من {total_signals} إشارات مختلفة"
 
         send_telegram(message)
@@ -138,11 +147,9 @@ def process_signal(signal_text: str):
 def webhook():
     signal_text = request.get_data(as_text=True)
     sa_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
-
     print(f"🌐 طلب وارد: POST /webhook")
     print(f"⏰ وقت الاستلام (السعودي): {sa_time}")
     print(f"📨 بيانات webhook ({len(signal_text)} chars): {signal_text}")
-
     process_signal(signal_text)
     return jsonify({"status": "ok"}), 200
 
