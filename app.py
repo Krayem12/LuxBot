@@ -140,12 +140,17 @@ def process_signal(symbol: str, signal_text: str):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        data = request.get_json(force=True)
-        print(f"🌐 طلب وارد: {data}")
+        # أولاً نحاول نقرأ JSON
+        data = request.get_json(silent=True)
+        if data and "message" in data:
+            raw_message = data["message"].strip()
+        else:
+            # إذا مو JSON، نقرأه كنص عادي
+            raw_message = request.data.decode("utf-8").strip()
 
-        raw_message = data.get("message", "").strip()
+        print(f"🌐 طلب وارد: {raw_message}")
+
         match = re.match(r"(\w+)\s*[:\-]\s*(.+)", raw_message)
-
         if not match:
             return jsonify({"status": "خطأ", "reason": "صيغة الرسالة غير صحيحة"}), 400
 
