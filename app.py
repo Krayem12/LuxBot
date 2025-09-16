@@ -194,7 +194,7 @@ def webhook():
 # ===== تجربة اتجاه افتراضي بعد 5 ثواني عبر POST داخلي =====
 def send_test_signal_via_webhook():
     import time, requests
-    time.sleep(5)
+    time.sleep(15)
     default_trend = os.getenv("DEFAULT_TREND", "bearish").lower()
     symbol = "SPX500"
     signal_text = f"Trend Catcher {'Bullish' if default_trend=='bullish' else 'Bearish'} {symbol}"
