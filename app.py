@@ -4,6 +4,7 @@ import requests
 import hashlib
 from collections import defaultdict
 import re
+import os
 
 app = Flask(__name__)
 
@@ -190,23 +191,18 @@ def webhook():
     process_signal(signal_text)
     return jsonify({"status": "ok"}), 200
 
-# ===== تشغيل السيرفر مع إضافة التحديث التفاعلي للاتجاه العام =====
+# ===== تجربة اتجاه افتراضي عند النشر (بدون input) =====
+def test_default_trend():
+    default_trend = os.getenv("DEFAULT_TREND", "bearish").lower()  # "bullish" أو "bearish"
+    if default_trend not in ["bullish", "bearish"]:
+        default_trend = "bearish"
+
+    symbol = "SPX500"
+    signal_text = f"Trend Catcher {'Bullish' if default_trend=='bullish' else 'Bearish'} {symbol}"
+    process_signal(signal_text)
+
+# ===== تشغيل السيرفر =====
 if __name__ == "__main__":
-    print("اختر الاتجاه لتجربة تحديث الاتجاه العام:")
-    print("1 → صعود")
-    print("2 → هبوط")
-    choice = input("أدخل رقم الاختيار (1 أو 2): ").strip()
-
-    if choice == "1":
-        test_signal = "Trend Catcher Bullish SPX500"
-    elif choice == "2":
-        test_signal = "Trend Catcher Bearish SPX500"
-    else:
-        print("خيار غير صالح! سيتم استخدام هبوط افتراضي.")
-        test_signal = "Trend Catcher Bearish SPX500"
-
-    # إرسال تحديث الاتجاه العام حسب اختيار المستخدم
-    process_signal(test_signal)
-
-    # تشغيل السيرفر
+    # تجربة الاتجاه الافتراضي عند التشغيل
+    test_default_trend()
     app.run(host="0.0.0.0", port=10000)
