@@ -5,6 +5,8 @@ import hashlib
 from collections import defaultdict
 import re
 import os
+import threading
+import time
 
 app = Flask(__name__)
 
@@ -191,18 +193,15 @@ def webhook():
     process_signal(signal_text)
     return jsonify({"status": "ok"}), 200
 
-# ===== تجربة اتجاه افتراضي عند النشر (بدون input) =====
-def test_default_trend():
+# ===== تجربة اتجاه افتراضي بعد 5 ثواني من بدء السيرفر =====
+def send_test_signal():
+    time.sleep(5)
     default_trend = os.getenv("DEFAULT_TREND", "bearish").lower()  # "bullish" أو "bearish"
-    if default_trend not in ["bullish", "bearish"]:
-        default_trend = "bearish"
-
     symbol = "SPX500"
     signal_text = f"Trend Catcher {'Bullish' if default_trend=='bullish' else 'Bearish'} {symbol}"
     process_signal(signal_text)
 
 # ===== تشغيل السيرفر =====
 if __name__ == "__main__":
-    # تجربة الاتجاه الافتراضي عند التشغيل
-    test_default_trend()
+    threading.Thread(target=send_test_signal).start()
     app.run(host="0.0.0.0", port=10000)
