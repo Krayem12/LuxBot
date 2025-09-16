@@ -97,11 +97,11 @@ def process_signal(signal_text: str):
             signals_store[symbol] = {"bullish": {}, "bearish": {}}
 
             emoji = "🟢📈" if trend_catcher == "bullish" else "🔴📉"
-            trend_text = "صاعد (Bullish)" if trend_catcher == "bullish" else "هابط (Bearish)"
+            arabic_trend = "صعود" if trend_catcher == "bullish" else "هبوط"
             message = (
                 f"📢 تحديث الاتجاه العام\n"
                 f"{emoji} الرمز: {symbol}\n"
-                f"📊 الاتجاه الحالي: {trend_text}\n"
+                f"📊 الاتجاه الحالي: {arabic_trend}\n"
                 f"⏰ الوقت: {sa_time}\n"
                 f"⚠️ أي إشارات دخول سابقة تم مسحها تلقائيًا"
             )
@@ -153,19 +153,27 @@ def process_signal(signal_text: str):
     print(f"✅ خزّننا إشارة {direction} لـ {symbol} ⏰ {sa_time}: {signal_text}")
 
     # ===== تحقق من عدد الإشارات المختلفة بنفس الاتجاه =====
-    if len(signals_store[symbol][direction]) >= 3:  # عدد إشارات الدخول المطلوبة = 3
+    if len(signals_store[symbol][direction]) >= 2:  # عدد إشارات الدخول المطلوبة = 2
         signals_list = list(signals_store[symbol][direction].values())
         total_signals = len(signals_list)
-        color_emoji = "🔵" if direction == "bullish" else "🔴"
-        arrow_emoji = "📈" if direction == "bullish" else "📉"
+        
+        # تحديد الرموز والألوان واتجاه بالعربية
+        if direction == "bullish":
+            color_emoji = "🔵"
+            arrow_emoji = "📈"
+            arabic_direction = "صعود"
+        else:  # bearish
+            color_emoji = "🔴"
+            arrow_emoji = "📉"
+            arabic_direction = "هبوط"
 
-        message = f"{arrow_emoji} {symbol} - {color_emoji} تأكيد إشارة قوية {direction}\n\n"
+        message = f"{arrow_emoji} {symbol} - {color_emoji} تأكيد إشارة قوية {arabic_direction}\n\n"
         message += "📊 الإشارات المختلفة:\n"
         for sig in signals_list:
             message += f"• {sig}\n"
         message += f"\n🔢 عدد الإشارات الكلي: {total_signals}\n"
         message += f"⏰ {sa_time}\n\n"
-        message += f"{color_emoji} متوقع حركة {direction} من {total_signals} إشارات مختلفة"
+        message += f"{color_emoji} متوقع حركة {arabic_direction} من {total_signals} إشارات مختلفة"
 
         send_telegram(message)
         # مسح الإشارات بعد الإرسال
