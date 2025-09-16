@@ -153,7 +153,7 @@ def process_signal(signal_text: str):
     print(f"✅ خزّننا إشارة {direction} لـ {symbol} ⏰ {sa_time}: {signal_text}")
 
     # ===== تحقق من عدد الإشارات المختلفة بنفس الاتجاه =====
-    if len(signals_store[symbol][direction]) >= 2:  # عدد إشارات الدخول المطلوبة = 2
+    if len(signals_store[symbol][direction]) >= 3:  # عدد إشارات الدخول المطلوبة = 3
         signals_list = list(signals_store[symbol][direction].values())
         total_signals = len(signals_list)
         color_emoji = "🔵" if direction == "bullish" else "🔴"
