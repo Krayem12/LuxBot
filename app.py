@@ -11,11 +11,11 @@ app = Flask(__name__)
 # ===== إعداد التوقيت السعودي =====
 TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 
-# ===== إعدادات التليجرام =====
-TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavjhtGmAxRg0TwLPdGxaVx8"
-TELEGRAM_CHAT_ID = "6788824696"
+# ===== بيانات التليجرام (محدثة) =====
+TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
+TELEGRAM_CHAT_ID = "624881400"
 
-# ===== التخزين (⚠️ بالذاكرة فقط) =====
+# ===== التخزين بالذاكرة =====
 signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
 used_signals = defaultdict(lambda: {"bullish": [], "bearish": []})
 alerts_count = defaultdict(lambda: {"bullish": 0, "bearish": 0})
@@ -36,7 +36,7 @@ def send_telegram(message: str):
     except Exception as e:
         logger.error(f"❌ خطأ في إرسال التليجرام: {e}")
 
-# ===== دالة تجيب الوقت السعودي =====
+# ===== دالة ترجع الوقت السعودي =====
 def get_sa_time():
     return (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
 
