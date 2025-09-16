@@ -15,13 +15,16 @@ TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 TELEGRAM_CHAT_ID = "624881400"
 
+# ===== رابط الخادم الخارجي =====
+EXTERNAL_URL = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
+
 # ===== التخزين بالذاكرة =====
 signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
 used_signals = defaultdict(lambda: {"bullish": [], "bearish": []})
 alerts_count = defaultdict(lambda: {"bullish": 0, "bearish": 0})
 general_trend = {}
 
-# ===== Logging (إلغاء وقت السيرفر والاكتفاء بوقت سعودي) =====
+# ===== Logging =====
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,25 @@ def send_telegram(message: str):
             logger.error(f"[{get_sa_time()}] ❌ Telegram send failed {resp.status_code}: {resp.text}")
     except Exception as e:
         logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال التليجرام: {e}")
+
+# ===== إرسال نفس النص للخادم الخارجي =====
+def send_external(message: str):
+    try:
+        resp = requests.post(
+            EXTERNAL_URL,
+            data=message.encode("utf-8"),
+            headers={"Content-Type": "text/plain"},
+            timeout=10
+        )
+        if resp.status_code != 200:
+            logger.error(f"[{get_sa_time()}] ❌ External send failed {resp.status_code}: {resp.text}")
+    except Exception as e:
+        logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال للخادم الخارجي: {e}")
+
+# ===== دالة إرسال مزدوج (تليجرام + خارجي) =====
+def send_message(message: str):
+    send_telegram(message)
+    send_external(message)
 
 # ===== معالجة الإشارات =====
 def process_signal(symbol: str, signal_text: str):
@@ -68,7 +90,7 @@ def process_signal(symbol: str, signal_text: str):
                 f"⏰ الوقت: {sa_time}\n"
                 f"⚠️ إشارات الدخول السابقة تم مسحها تلقائيًا"
             )
-            send_telegram(message)
+            send_message(message)
             logger.info(f"[{sa_time}] ⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
         return
 
@@ -80,7 +102,7 @@ def process_signal(symbol: str, signal_text: str):
                 f"🟢📈 الرمز: {symbol}\n"
                 f"⏰ الوقت: {sa_time}"
             )
-            send_telegram(message)
+            send_message(message)
             logger.info(f"[{sa_time}] ✅ {symbol}: تم تأكيد الاتجاه صعود قوي")
         else:
             reason = "لأنه لا يوجد اتجاه عام محدد" if symbol not in general_trend else f"لأنه يعاكس الاتجاه العام {general_trend[symbol]}"
@@ -94,7 +116,7 @@ def process_signal(symbol: str, signal_text: str):
                 f"🔴📉 الرمز: {symbol}\n"
                 f"⏰ الوقت: {sa_time}"
             )
-            send_telegram(message)
+            send_message(message)
             logger.info(f"[{sa_time}] ✅ {symbol}: تم تأكيد الاتجاه هبوط قوي")
         else:
             reason = "لأنه لا يوجد اتجاه عام محدد" if symbol not in general_trend else f"لأنه يعاكس الاتجاه العام {general_trend[symbol]}"
@@ -152,7 +174,7 @@ def process_signal(symbol: str, signal_text: str):
             f"📢 إجمالي عدد التنبيهات المرسلة: {alerts_count[symbol][direction]}\n"
             f"⏰ وقت التنبيه: {sa_time}"
         )
-        send_telegram(message)
+        send_message(message)
         logger.info(f"[{sa_time}] ✅ {symbol}: تم إرسال تنبيه دخول #{alerts_count[symbol][direction]} باعتماد إشارتين جديدتين")
 
 # ===== Webhook =====
