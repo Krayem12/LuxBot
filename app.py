@@ -11,7 +11,7 @@ app = Flask(__name__)
 # ===== إعداد التوقيت السعودي =====
 TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 
-# ===== بيانات التليجرام (محدثة) =====
+# ===== بيانات التليجرام =====
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
 TELEGRAM_CHAT_ID = "624881400"
 
@@ -21,9 +21,13 @@ used_signals = defaultdict(lambda: {"bullish": [], "bearish": []})
 alerts_count = defaultdict(lambda: {"bullish": 0, "bearish": 0})
 general_trend = {}
 
-# ===== Logging =====
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# ===== Logging (إلغاء وقت السيرفر والاكتفاء بوقت سعودي) =====
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+# ===== دالة ترجع الوقت السعودي =====
+def get_sa_time():
+    return (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
 
 # ===== إرسال رسالة للتليجرام =====
 def send_telegram(message: str):
@@ -32,13 +36,9 @@ def send_telegram(message: str):
     try:
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code != 200:
-            logger.error(f"❌ Telegram send failed {resp.status_code}: {resp.text}")
+            logger.error(f"[{get_sa_time()}] ❌ Telegram send failed {resp.status_code}: {resp.text}")
     except Exception as e:
-        logger.error(f"❌ خطأ في إرسال التليجرام: {e}")
-
-# ===== دالة ترجع الوقت السعودي =====
-def get_sa_time():
-    return (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
+        logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال التليجرام: {e}")
 
 # ===== معالجة الإشارات =====
 def process_signal(symbol: str, signal_text: str):
@@ -69,7 +69,7 @@ def process_signal(symbol: str, signal_text: str):
                 f"⚠️ إشارات الدخول السابقة تم مسحها تلقائيًا"
             )
             send_telegram(message)
-            logger.info(f"⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
+            logger.info(f"[{sa_time}] ⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
         return
 
     # ===== تأكيد الاتجاه (Trend Crossing) =====
@@ -81,7 +81,10 @@ def process_signal(symbol: str, signal_text: str):
                 f"⏰ الوقت: {sa_time}"
             )
             send_telegram(message)
-            logger.info(f"✅ {symbol}: تم تأكيد الاتجاه صعود قوي")
+            logger.info(f"[{sa_time}] ✅ {symbol}: تم تأكيد الاتجاه صعود قوي")
+        else:
+            reason = "لأنه لا يوجد اتجاه عام محدد" if symbol not in general_trend else f"لأنه يعاكس الاتجاه العام {general_trend[symbol]}"
+            logger.info(f"[{sa_time}] ⏭️ تجاهل تأكيد الاتجاه {signal_text} لـ {symbol} {reason}")
         return
 
     if "Trend Crossing Down" in signal_text:
@@ -92,7 +95,10 @@ def process_signal(symbol: str, signal_text: str):
                 f"⏰ الوقت: {sa_time}"
             )
             send_telegram(message)
-            logger.info(f"✅ {symbol}: تم تأكيد الاتجاه هبوط قوي")
+            logger.info(f"[{sa_time}] ✅ {symbol}: تم تأكيد الاتجاه هبوط قوي")
+        else:
+            reason = "لأنه لا يوجد اتجاه عام محدد" if symbol not in general_trend else f"لأنه يعاكس الاتجاه العام {general_trend[symbol]}"
+            logger.info(f"[{sa_time}] ⏭️ تجاهل تأكيد الاتجاه {signal_text} لـ {symbol} {reason}")
         return
 
     # ===== إشارات الدخول العادية =====
@@ -103,20 +109,20 @@ def process_signal(symbol: str, signal_text: str):
         direction = "bearish"
 
     if not direction:
-        logger.info(f"⏭️ تجاهل إشارة غير معروفة: {signal_text}")
+        logger.info(f"[{sa_time}] ⏭️ تجاهل إشارة غير معروفة: {signal_text}")
         return
 
     if symbol not in general_trend:
-        logger.info(f"⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنه لا يوجد اتجاه عام محدد")
+        logger.info(f"[{sa_time}] ⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنه لا يوجد اتجاه عام محدد")
         return
 
     if direction != general_trend[symbol]:
-        logger.info(f"⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنها تعاكس الاتجاه العام {general_trend[symbol]}")
+        logger.info(f"[{sa_time}] ⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنها تعاكس الاتجاه العام {general_trend[symbol]}")
         return
 
     signal_id = hashlib.sha256(signal_text.encode()).hexdigest()
     if signal_id in signals_store[symbol][direction]:
-        logger.info(f"⏭️ تجاهل إشارة مكررة: {signal_text}")
+        logger.info(f"[{sa_time}] ⏭️ تجاهل إشارة مكررة: {signal_text}")
         return
 
     signals_store[symbol][direction][signal_id] = sa_time
@@ -125,7 +131,7 @@ def process_signal(symbol: str, signal_text: str):
         used_signals[symbol][direction].append({"text": signal_text, "time": sa_time})
 
     total_new_signals = len(used_signals[symbol][direction])
-    logger.info(f"📌 {symbol}: إشارات {direction} المخزنة = {total_new_signals}")
+    logger.info(f"[{sa_time}] 📌 {symbol}: إشارات {direction} المخزنة = {total_new_signals}")
 
     if total_new_signals % 2 == 0 and total_new_signals > 0:
         alerts_count[symbol][direction] += 1
@@ -147,7 +153,7 @@ def process_signal(symbol: str, signal_text: str):
             f"⏰ وقت التنبيه: {sa_time}"
         )
         send_telegram(message)
-        logger.info(f"✅ {symbol}: تم إرسال تنبيه دخول #{alerts_count[symbol][direction]} باعتماد إشارتين جديدتين")
+        logger.info(f"[{sa_time}] ✅ {symbol}: تم إرسال تنبيه دخول #{alerts_count[symbol][direction]} باعتماد إشارتين جديدتين")
 
 # ===== Webhook =====
 @app.route("/webhook", methods=["POST"])
@@ -166,7 +172,7 @@ def webhook():
         if not raw_message:
             raw_message = request.data.decode("utf-8").strip()
 
-        logger.info(f"🌐 طلب وارد: {raw_message}")
+        logger.info(f"[{get_sa_time()}] 🌐 طلب وارد: {raw_message}")
 
         match = re.match(r"^(.+?)\s*[:\-]\s*(.+)$", raw_message)
         if match:
@@ -183,7 +189,7 @@ def webhook():
         return jsonify({"status": "success"}), 200
 
     except Exception as e:
-        logger.error(f"❌ خطأ في المعالجة: {e}")
+        logger.error(f"[{get_sa_time()}] ❌ خطأ في المعالجة: {e}")
         return jsonify({"status": "error", "reason": str(e)}), 500
 
 if __name__ == "__main__":
