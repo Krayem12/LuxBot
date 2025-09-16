@@ -4,6 +4,7 @@ import hashlib
 from collections import defaultdict
 import re
 import requests
+import logging
 
 app = Flask(__name__)
 
@@ -14,20 +15,26 @@ TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavjhtGmAxRg0TwLPdGxaVx8"
 TELEGRAM_CHAT_ID = "6788824696"
 
-# ===== التخزين =====
+# ===== التخزين (⚠️ ملاحظة: هذا تخزين بالذاكرة فقط - غير مشترك بين workers) =====
 signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
 used_signals = defaultdict(lambda: {"bullish": [], "bearish": []})  # تخزين (النص + الوقت)
 alerts_count = defaultdict(lambda: {"bullish": 0, "bearish": 0})    # عداد التنبيهات
 general_trend = {}  # الاتجاه العام لكل رمز
+
+# ===== Logging محسّن =====
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
 # ===== إرسال رسالة للتليجرام =====
 def send_telegram(message: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
     try:
-        requests.post(url, json=payload)
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code != 200:
+            logger.error(f"❌ Telegram send failed {resp.status_code}: {resp.text}")
     except Exception as e:
-        print(f"❌ خطأ في إرسال التليجرام: {e}")
+        logger.error(f"❌ خطأ في إرسال التليجرام: {e}")
 
 # ===== دالة تجيب الوقت السعودي =====
 def get_sa_time():
@@ -63,7 +70,7 @@ def process_signal(symbol: str, signal_text: str):
                 f"⚠️ إشارات الدخول السابقة تم مسحها تلقائيًا"
             )
             send_telegram(message)
-            print(f"⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
+            logger.info(f"⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
         return
 
     # ===== تأكيد الاتجاه (Trend Crossing) =====
@@ -76,7 +83,7 @@ def process_signal(symbol: str, signal_text: str):
                 f"⏰ الوقت: {sa_time}"
             )
             send_telegram(message)
-            print(f"✅ {symbol}: تم تأكيد الاتجاه صعود قوي")
+            logger.info(f"✅ {symbol}: تم تأكيد الاتجاه صعود قوي")
         return
 
     if "Trend Crossing Down" in signal_text:
@@ -88,33 +95,33 @@ def process_signal(symbol: str, signal_text: str):
                 f"⏰ الوقت: {sa_time}"
             )
             send_telegram(message)
-            print(f"✅ {symbol}: تم تأكيد الاتجاه هبوط قوي")
+            logger.info(f"✅ {symbol}: تم تأكيد الاتجاه هبوط قوي")
         return
 
     # ===== إشارات الدخول العادية =====
     direction = None
-    if any(word in signal_text for word in ["bullish", "Bullish", "BULLISH"]):
+    if re.search(r"\bbullish\b", signal_text, re.I):
         direction = "bullish"
-    elif any(word in signal_text for word in ["bearish", "Bearish", "BEARISH"]):
+    elif re.search(r"\bbearish\b", signal_text, re.I):
         direction = "bearish"
 
     if not direction:
-        print(f"⏭️ تجاهل إشارة غير معروفة: {signal_text}")
+        logger.info(f"⏭️ تجاهل إشارة غير معروفة: {signal_text}")
         return
 
     if symbol not in general_trend:
-        print(f"⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنه لا يوجد اتجاه عام محدد")
+        logger.info(f"⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنه لا يوجد اتجاه عام محدد")
         return
 
     # تجاهل إذا كانت معاكسة للاتجاه العام
     if direction != general_trend[symbol]:
-        print(f"⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنها تعاكس الاتجاه العام {general_trend[symbol]}")
+        logger.info(f"⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنها تعاكس الاتجاه العام {general_trend[symbol]}")
         return
 
     # توليد معرف فريد للإشارة
     signal_id = hashlib.sha256(signal_text.encode()).hexdigest()
     if signal_id in signals_store[symbol][direction]:
-        print(f"⏭️ تجاهل إشارة مكررة: {signal_text}")
+        logger.info(f"⏭️ تجاهل إشارة مكررة: {signal_text}")
         return
 
     # حفظ الإشارة
@@ -125,7 +132,7 @@ def process_signal(symbol: str, signal_text: str):
         used_signals[symbol][direction].append({"text": signal_text, "time": sa_time})
 
     total_new_signals = len(used_signals[symbol][direction])
-    print(f"📌 {symbol}: إشارات {direction} المخزنة = {total_new_signals}")
+    logger.info(f"📌 {symbol}: إشارات {direction} المخزنة = {total_new_signals}")
 
     # إذا صار عندنا إشارتين جديدتين مختلفتين منذ آخر تنبيه → يرسل تنبيه دخول
     if total_new_signals % 2 == 0 and total_new_signals > 0:
@@ -148,7 +155,7 @@ def process_signal(symbol: str, signal_text: str):
             f"⏰ وقت التنبيه: {sa_time}"
         )
         send_telegram(message)
-        print(f"✅ {symbol}: تم إرسال تنبيه دخول #{alerts_count[symbol][direction]} باعتماد إشارتين جديدتين")
+        logger.info(f"✅ {symbol}: تم إرسال تنبيه دخول #{alerts_count[symbol][direction]} باعتماد إشارتين جديدتين")
 
 
 # ===== Webhook لاستقبال الإشارات من TradingView =====
@@ -157,32 +164,40 @@ def webhook():
     try:
         # أولاً نحاول نقرأ JSON
         data = request.get_json(silent=True)
-        if data and "message" in data:
-            raw_message = data["message"].strip()
-        else:
-            # إذا مو JSON، نقرأه كنص عادي
+        raw_message = None
+        if data:
+            if "message" in data:
+                raw_message = data["message"].strip()
+            else:
+                # fallback: أول قيمة نصية
+                for v in data.values():
+                    if isinstance(v, str) and v.strip():
+                        raw_message = v.strip()
+                        break
+        if not raw_message:
             raw_message = request.data.decode("utf-8").strip()
 
-        print(f"🌐 طلب وارد: {raw_message}")
+        logger.info(f"🌐 طلب وارد: {raw_message}")
 
-        # ✅ صيغة "SYMBOL: SIGNAL"
-        match = re.match(r"(\w+)\s*[:\-]\s*(.+)", raw_message)
+        # محاولة regex لقبول رموز مع أحرف خاصة
+        match = re.match(r"^(.+?)\s*[:\-]\s*(.+)$", raw_message)
         if match:
             symbol, signal_text = match.groups()
         else:
-            # ✅ صيغة سطرين
-            parts = raw_message.splitlines()
-            if len(parts) == 2:
-                signal_text, symbol = parts[0].strip(), parts[1].strip()
+            # fallback: نعتبر آخر سطر هو الرمز
+            parts = [p.strip() for p in raw_message.splitlines() if p.strip()]
+            if len(parts) >= 2:
+                symbol = parts[-1]
+                signal_text = " ".join(parts[:-1])
             else:
                 return jsonify({"status": "خطأ", "reason": "صيغة الرسالة غير صحيحة"}), 400
 
-        process_signal(symbol, signal_text)
+        process_signal(symbol.strip(), signal_text.strip())
 
         return jsonify({"status": "success"}), 200
 
     except Exception as e:
-        print(f"❌ خطأ في المعالجة: {e}")
+        logger.error(f"❌ خطأ في المعالجة: {e}")
         return jsonify({"status": "error", "reason": str(e)}), 500
 
 
