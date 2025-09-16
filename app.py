@@ -29,7 +29,20 @@ def load_allowed_stocks(file_path="stocks.txt"):
 
 ALLOWED_STOCKS = load_allowed_stocks()
 
-# ===== دالة ارسال رسالة للتليجرام =====
+# ===== دالة ارسال POST خارجي بنفس الرسالة =====
+def send_post_request(message: str):
+    url = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
+    payload = {"text": message}  # نفس الرسالة بالضبط
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            print(f"✅ أرسلنا POST خارجي")
+        else:
+            print(f"⚠️ فشل ارسال POST خارجي ({response.status_code}): {response.text}")
+    except Exception as e:
+        print(f"⚠️ خطأ أثناء ارسال POST خارجي: {e}")
+
+# ===== دالة ارسال رسالة للتليجرام + POST خارجي =====
 def send_telegram(message: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
@@ -41,6 +54,9 @@ def send_telegram(message: str):
             print(f"⚠️ فشل ارسال التليجرام ({response.status_code}): {response.text}")
     except Exception as e:
         print(f"⚠️ خطأ أثناء ارسال التليجرام: {e}")
+
+    # 🔹 إرسال نفس الرسالة للـ endpoint الخارجي
+    send_post_request(message)
 
 # ===== دالة إنشاء هاش فريد للإشارة =====
 def hash_signal(signal_text: str):
