@@ -16,8 +16,9 @@ TELEGRAM_CHAT_ID = "6788824696"
 
 # ===== التخزين =====
 signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
-general_trend = {}         # الاتجاه العام لكل رمز
-trend_confirmation = {}    # تأكيد الاتجاه لكل رمز
+used_signals = defaultdict(lambda: {"bullish": [], "bearish": []})  # تخزين (النص + الوقت)
+alerts_count = defaultdict(lambda: {"bullish": 0, "bearish": 0})    # عداد التنبيهات
+general_trend = {}  # الاتجاه العام لكل رمز
 
 # ===== إرسال رسالة للتليجرام =====
 def send_telegram(message: str):
@@ -36,11 +37,11 @@ def get_sa_time():
 def process_signal(symbol: str, signal_text: str):
     sa_time = get_sa_time()
 
-    # ===== الاتجاه العام (Trend Catcher / Trend Tracer) =====
+    # ===== الاتجاه العام (Trend Catcher فقط) =====
     trend_catcher = None
-    if "Trend Catcher Bullish" in signal_text or "Trend Tracer Bullish" in signal_text:
+    if "Trend Catcher Bullish" in signal_text:
         trend_catcher = "bullish"
-    elif "Trend Catcher Bearish" in signal_text or "Trend Tracer Bearish" in signal_text:
+    elif "Trend Catcher Bearish" in signal_text:
         trend_catcher = "bearish"
 
     if trend_catcher:
@@ -49,6 +50,8 @@ def process_signal(symbol: str, signal_text: str):
             general_trend[symbol] = trend_catcher
             # 🗑️ مسح إشارات الدخول القديمة فقط عند تغير الاتجاه العام
             signals_store[symbol] = {"bullish": {}, "bearish": {}}
+            used_signals[symbol] = {"bullish": [], "bearish": []}
+            alerts_count[symbol] = {"bullish": 0, "bearish": 0}
 
             emoji = "🟢📈" if trend_catcher == "bullish" else "🔴📉"
             arabic_trend = "صعود" if trend_catcher == "bullish" else "هبوط"
@@ -63,35 +66,29 @@ def process_signal(symbol: str, signal_text: str):
             print(f"⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
         return
 
-    # ===== تأكيد الاتجاه (Trend Crossing Up / Down) =====
-    trend_confirm = None
+    # ===== تأكيد الاتجاه (Trend Crossing) =====
     if "Trend Crossing Up" in signal_text:
-        trend_confirm = "bullish"
-    elif "Trend Crossing Down" in signal_text:
-        trend_confirm = "bearish"
-
-    if trend_confirm:
-        if symbol not in general_trend:
-            print(f"⏭️ تجاهل تأكيد الاتجاه {signal_text} لـ {symbol} لأنه لم يحدد اتجاه عام بعد")
-            return
-
-        if trend_confirm != general_trend[symbol]:
-            print(f"⏭️ تجاهل تأكيد الاتجاه {signal_text} لـ {symbol} لأنه يعاكس الاتجاه العام {general_trend[symbol]}")
-            return
-
-        prev_confirm = trend_confirmation.get(symbol)
-        if prev_confirm != trend_confirm:
-            trend_confirmation[symbol] = trend_confirm
-
-            emoji = "🟢✅" if trend_confirm == "bullish" else "🔴✅"
-            arabic_trend = "تأكيد صعود" if trend_confirm == "bullish" else "تأكيد هبوط"
+        if general_trend.get(symbol) == "bullish":
+            emoji = "🟢📈"
             message = (
-                f"📢 {arabic_trend}\n"
+                f"📢 تم تأكيد الاتجاه الى صعود قوي\n"
                 f"{emoji} الرمز: {symbol}\n"
                 f"⏰ الوقت: {sa_time}"
             )
             send_telegram(message)
-            print(f"✅ {symbol}: تم تأكيد الاتجاه {trend_confirm}")
+            print(f"✅ {symbol}: تم تأكيد الاتجاه صعود قوي")
+        return
+
+    if "Trend Crossing Down" in signal_text:
+        if general_trend.get(symbol) == "bearish":
+            emoji = "🔴📉"
+            message = (
+                f"📢 تم تأكيد الاتجاه الى هبوط قوي\n"
+                f"{emoji} الرمز: {symbol}\n"
+                f"⏰ الوقت: {sa_time}"
+            )
+            send_telegram(message)
+            print(f"✅ {symbol}: تم تأكيد الاتجاه هبوط قوي")
         return
 
     # ===== إشارات الدخول العادية =====
@@ -114,26 +111,44 @@ def process_signal(symbol: str, signal_text: str):
         print(f"⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنها تعاكس الاتجاه العام {general_trend[symbol]}")
         return
 
-    # توليد معرف فريد للإشارة لمنع التكرار
+    # توليد معرف فريد للإشارة
     signal_id = hashlib.sha256(signal_text.encode()).hexdigest()
-
     if signal_id in signals_store[symbol][direction]:
         print(f"⏭️ تجاهل إشارة مكررة: {signal_text}")
         return
 
+    # حفظ الإشارة
     signals_store[symbol][direction][signal_id] = sa_time
 
-    emoji = "🟢" if direction == "bullish" else "🔴"
-    arabic_dir = "شراء" if direction == "bullish" else "بيع"
-    message = (
-        f"📌 إشارة دخول جديدة\n"
-        f"{emoji} الرمز: {symbol}\n"
-        f"📊 نوع الإشارة: {arabic_dir}\n"
-        f"📝 الوصف: {signal_text}\n"
-        f"⏰ الوقت: {sa_time}"
-    )
-    send_telegram(message)
-    print(f"✅ خزّنّا إشارة {direction} لـ {symbol}: {signal_text}")
+    # إذا الإشارة جديدة كليًا (ما استخدمت في أي تنبيه سابق)
+    if not any(sig["text"] == signal_text for sig in used_signals[symbol][direction]):
+        used_signals[symbol][direction].append({"text": signal_text, "time": sa_time})
+
+    total_new_signals = len(used_signals[symbol][direction])
+    print(f"📌 {symbol}: إشارات {direction} المخزنة = {total_new_signals}")
+
+    # إذا صار عندنا إشارتين جديدتين مختلفتين منذ آخر تنبيه → يرسل تنبيه دخول
+    if total_new_signals % 2 == 0 and total_new_signals > 0:
+        alerts_count[symbol][direction] += 1
+        last_two = used_signals[symbol][direction][-2:]  # آخر إشارتين مختلفتين
+        emoji = "🟢" if direction == "bullish" else "🔴"
+        arabic_dir = "شراء" if direction == "bullish" else "بيع"
+
+        signals_details = "\n".join(
+            [f"- {sig['text']} (⏰ {sig['time']})" for sig in last_two]
+        )
+
+        message = (
+            f"📌 إشارة دخول جديدة (تنبيه رقم {alerts_count[symbol][direction]})\n"
+            f"{emoji} الرمز: {symbol}\n"
+            f"📊 نوع الإشارة: {arabic_dir}\n"
+            f"📝 الإشارتان المستخدمتان:\n{signals_details}\n"
+            f"📊 إجمالي الإشارات المختلفة المخزنة: {total_new_signals}\n"
+            f"📢 إجمالي عدد التنبيهات المرسلة: {alerts_count[symbol][direction]}\n"
+            f"⏰ وقت التنبيه: {sa_time}"
+        )
+        send_telegram(message)
+        print(f"✅ {symbol}: تم إرسال تنبيه دخول #{alerts_count[symbol][direction]} باعتماد إشارتين جديدتين")
 
 
 # ===== Webhook لاستقبال الإشارات من TradingView =====
@@ -150,11 +165,18 @@ def webhook():
 
         print(f"🌐 طلب وارد: {raw_message}")
 
+        # ✅ صيغة "SYMBOL: SIGNAL"
         match = re.match(r"(\w+)\s*[:\-]\s*(.+)", raw_message)
-        if not match:
-            return jsonify({"status": "خطأ", "reason": "صيغة الرسالة غير صحيحة"}), 400
+        if match:
+            symbol, signal_text = match.groups()
+        else:
+            # ✅ صيغة سطرين
+            parts = raw_message.splitlines()
+            if len(parts) == 2:
+                signal_text, symbol = parts[0].strip(), parts[1].strip()
+            else:
+                return jsonify({"status": "خطأ", "reason": "صيغة الرسالة غير صحيحة"}), 400
 
-        symbol, signal_text = match.groups()
         process_signal(symbol, signal_text)
 
         return jsonify({"status": "success"}), 200
