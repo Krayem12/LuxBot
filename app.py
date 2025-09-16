@@ -4,7 +4,6 @@ import requests
 import hashlib
 from collections import defaultdict
 import re
-import os
 
 app = Flask(__name__)
 
@@ -191,21 +190,6 @@ def webhook():
     process_signal(signal_text)
     return jsonify({"status": "ok"}), 200
 
-# ===== تجربة اتجاه افتراضي بعد 5 ثواني عبر POST داخلي =====
-def send_test_signal_via_webhook():
-    import time, requests
-    time.sleep(15)
-    default_trend = os.getenv("DEFAULT_TREND", "bearish").lower()
-    symbol = "SPX500"
-    signal_text = f"Trend Catcher {'Bullish' if default_trend=='bullish' else 'Bearish'} {symbol}"
-    url = "http://127.0.0.1:10000/webhook"
-    try:
-        requests.post(url, data=signal_text, timeout=10)
-        print(f"✅ إرسال إشارة اختبارية عبر webhook للاتجاه {default_trend}")
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء إرسال الإشارة التجريبية: {e}")
-
 # ===== تشغيل السيرفر =====
 if __name__ == "__main__":
-    send_test_signal_via_webhook()
     app.run(host="0.0.0.0", port=10000)
