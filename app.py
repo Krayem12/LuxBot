@@ -17,12 +17,12 @@ CHAT_ID = "624881400"
 # ===== إعداد تخزين الإشارات =====
 signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
 general_trend = {}  # الاتجاه العام لكل رمز
+MIN_SIGNALS_TO_CONFIRM = 2  # عدد إشارات الدخول المطلوبة للتأكيد
 
 # ===== تحميل قائمة الأسهم المسموح بها من ملف =====
 def load_allowed_stocks(file_path="stocks.txt"):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
-            # كل سطر يمثل رمز سهم، نتخلص من الفراغات
             return set(line.strip().upper() for line in f if line.strip())
     except FileNotFoundError:
         print(f"⚠️ ملف الأسهم {file_path} غير موجود!")
@@ -76,15 +76,21 @@ def process_signal(signal_text: str):
     else:
         trend_catcher = None
 
-    if trend_catcher:  # اتجاه عام فقط
+    if trend_catcher:
         prev_trend = general_trend.get(symbol)
         if prev_trend != trend_catcher:
             general_trend[symbol] = trend_catcher
+            signals_store[symbol].clear()  # مسح الإشارات القديمة
+
             emoji = "🟢📈" if trend_catcher == "bullish" else "🔴📉"
-            message = f"{emoji} {symbol}\n📊 الاتجاه العام تغير من {prev_trend or 'N/A'} → {trend_catcher}\n⏰ {sa_time}"
-            send_telegram(message)
-            print(f"⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
-        return  # 🛑 إيقاف هنا — ما يعتبر إشارة دخول
+            # إشعار تغيير الاتجاه
+            message_trend = f"{emoji} {symbol}\n📊 الاتجاه العام تغير من {prev_trend or 'N/A'} → {trend_catcher}\n⏰ {sa_time}"
+            send_telegram(message_trend)
+
+            # إشعار مسح الإشارات السابقة
+            message_clear = f"🧹 {symbol} - تم مسح إشارات الدخول السابقة وإعادة التصفير بعد تغير الاتجاه.\n⏰ {sa_time}"
+            send_telegram(message_clear)
+        return  # الاتجاه العام فقط، ليس إشارة دخول
 
     # ===== تحديد اتجاه الإشارة العادية =====
     direction = None
@@ -93,7 +99,7 @@ def process_signal(signal_text: str):
     elif "bearish" in signal_text.lower():
         direction = "bearish"
 
-    # ===== دعم Hyper Wave =====
+    # دعم Hyper Wave
     if "Overbought Hyper Wave" in signal_text:
         direction = "bearish"
     elif "Oversold Hyper Wave" in signal_text:
@@ -125,19 +131,23 @@ def process_signal(signal_text: str):
     print(f"✅ خزّننا إشارة {direction} لـ {symbol} ⏰ {sa_time}: {signal_text}")
 
     # ===== تحقق من عدد الإشارات المختلفة بنفس الاتجاه =====
-    if len(signals_store[symbol][direction]) >= 3:
+    if len(signals_store[symbol][direction]) >= MIN_SIGNALS_TO_CONFIRM:
         signals_list = list(signals_store[symbol][direction].values())
         total_signals = len(signals_list)
         color_emoji = "🔵" if direction == "bullish" else "🔴"
         arrow_emoji = "📈" if direction == "bullish" else "📉"
 
-        message = f"{arrow_emoji} {symbol} - {color_emoji} تأكيد إشارة قوية {direction}\n\n"
-        message += "📊 الإشارات المختلفة:\n"
+        # تضمين الاتجاه العام الحالي في الرسالة
+        current_trend = general_trend.get(symbol, "N/A")
+
+        message = f"{arrow_emoji} {symbol} - {color_emoji} تأكيد إشارة قوية {direction}\n"
+        message += f"📊 الاتجاه العام الحالي: {current_trend}\n\n"
+        message += "📌 الإشارات المجمعة:\n"
         for sig in signals_list:
             message += f"• {sig}\n"
-        message += f"\n🔢 عدد الإشارات الكلي: {total_signals}\n"
-        message += f"⏰ {sa_time}\n\n"
-        message += f"{color_emoji} متوقع حركة {direction} من {total_signals} إشارات مختلفة"
+        message += f"\n🔢 عدد الإشارات: {total_signals}\n"
+        message += f"⏰ {sa_time}\n"
+        message += f"{color_emoji} متوقع حركة {direction} بناءً على {total_signals} إشارات مختلفة"
 
         send_telegram(message)
         signals_store[symbol][direction].clear()
