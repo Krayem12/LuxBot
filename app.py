@@ -190,6 +190,23 @@ def webhook():
     process_signal(signal_text)
     return jsonify({"status": "ok"}), 200
 
-# ===== تشغيل السيرفر =====
+# ===== تشغيل السيرفر مع إضافة التحديث التفاعلي للاتجاه العام =====
 if __name__ == "__main__":
+    print("اختر الاتجاه لتجربة تحديث الاتجاه العام:")
+    print("1 → صعود")
+    print("2 → هبوط")
+    choice = input("أدخل رقم الاختيار (1 أو 2): ").strip()
+
+    if choice == "1":
+        test_signal = "Trend Catcher Bullish SPX500"
+    elif choice == "2":
+        test_signal = "Trend Catcher Bearish SPX500"
+    else:
+        print("خيار غير صالح! سيتم استخدام هبوط افتراضي.")
+        test_signal = "Trend Catcher Bearish SPX500"
+
+    # إرسال تحديث الاتجاه العام حسب اختيار المستخدم
+    process_signal(test_signal)
+
+    # تشغيل السيرفر
     app.run(host="0.0.0.0", port=10000)
