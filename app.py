@@ -5,15 +5,19 @@ from collections import defaultdict
 import re
 import requests
 import logging
+import os  # لإدارة متغيرات البيئة
 
 app = Flask(__name__)
 
 # ===== إعداد التوقيت السعودي =====
 TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 
-# ===== بيانات التليجرام =====
-TELEGRAM_TOKEN = "8058697981:AAFuImKvuSKfavBaE2TfqlEESPZb9Ql-X9c"
-TELEGRAM_CHAT_ID = "624881400"
+# ===== بيانات التليجرام (من Environment Variables) =====
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    raise ValueError("❌ تأكد من ضبط TELEGRAM_TOKEN و TELEGRAM_CHAT_ID في متغيرات البيئة")
 
 # ===== رابط الخادم الخارجي =====
 EXTERNAL_URL = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
