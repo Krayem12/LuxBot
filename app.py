@@ -70,24 +70,53 @@ def send_message(message: str):
 def process_signal(symbol: str, signal_text: str):
     sa_time = get_sa_time()
 
-    # ===== إشارات Price Explosion (CALL / PUT SPX500) =====
-    if "CALL SPX500" in signal_text or "PUT SPX500" in signal_text:
-        direction = "CALL" if "CALL SPX500" in signal_text else "PUT"
+    # ===== Price Explosion Alerts (Balanced / Aggressive / Conservative) =====
+    pe_match = None
+    pe_label = None
 
-        # محاولة استخراج السعر إن وجد بعد @
+    # Balanced
+    if "CALL SPX500" in signal_text:
+        pe_match, pe_label = "CALL", "Balanced"
+    elif "PUT SPX500" in signal_text:
+        pe_match, pe_label = "PUT", "Balanced"
+
+    # Aggressive
+    elif "CALL2 SPX500" in signal_text:
+        pe_match, pe_label = "CALL", "Aggressive"
+    elif "PUT2 SPX500" in signal_text:
+        pe_match, pe_label = "PUT", "Aggressive"
+
+    # Conservative
+    elif "CALL3 SPX500" in signal_text:
+        pe_match, pe_label = "CALL", "Conservative"
+    elif "PUT3 SPX500" in signal_text:
+        pe_match, pe_label = "PUT", "Conservative"
+
+    if pe_match:
+        # حاول استخراج السعر بعد @
         price_match = re.search(r"@[\s]*([0-9]*\.?[0-9]+)", signal_text)
         price_text = price_match.group(1) if price_match else "N/A"
 
-        emoji = "📈" if direction == "CALL" else "📉"
+        emoji = "📈" if pe_match == "CALL" else "📉"
+
+        # صياغة الرسالة حسب نوع الاستراتيجية
+        if pe_label == "Balanced":
+            label_text = "🚀 Price Explosion (انفجار سعري) — Balanced"
+        elif pe_label == "Aggressive":
+            label_text = "🚀 Price Explosion (2 انفجار سعري) — Aggressive"
+        elif pe_label == "Conservative":
+            label_text = "🚀 Price Explosion (3 انفجار سعري) — Conservative"
+        else:
+            label_text = f"🚀 Price Explosion (انفجار سعري) — {pe_label}"
 
         message = (
-            f"🚀 Price Explosion (انفجار سعري)\n"
-            f"{emoji} {direction} — {symbol}\n"
+            f"{label_text}\n"
+            f"{emoji} {pe_match} — {symbol}\n"
             f"💰 Price: {price_text}\n"
             f"⏰ Time: {sa_time}"
         )
         send_message(message)
-        logger.info(f"[{sa_time}] ✅ {symbol}: Price Explosion {direction} sent with price {price_text}")
+        logger.info(f"[{sa_time}] ✅ {symbol}: {pe_label} Price Explosion {pe_match} sent with price {price_text}")
         return
 
     # ===== الاتجاه العام (Trend Catcher) =====
