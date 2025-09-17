@@ -70,6 +70,26 @@ def send_message(message: str):
 def process_signal(symbol: str, signal_text: str):
     sa_time = get_sa_time()
 
+    # ===== إشارات Price Explosion (CALL / PUT SPX500) =====
+    if "CALL SPX500" in signal_text or "PUT SPX500" in signal_text:
+        direction = "CALL" if "CALL SPX500" in signal_text else "PUT"
+
+        # محاولة استخراج السعر إن وجد بعد @
+        price_match = re.search(r"@[\s]*([0-9]*\.?[0-9]+)", signal_text)
+        price_text = price_match.group(1) if price_match else "N/A"
+
+        emoji = "📈" if direction == "CALL" else "📉"
+
+        message = (
+            f"🚀 Price Explosion (انفجار سعري)\n"
+            f"{emoji} {direction} — {symbol}\n"
+            f"💰 Price: {price_text}\n"
+            f"⏰ Time: {sa_time}"
+        )
+        send_message(message)
+        logger.info(f"[{sa_time}] ✅ {symbol}: Price Explosion {direction} sent with price {price_text}")
+        return
+
     # ===== الاتجاه العام (Trend Catcher) =====
     trend_catcher = None
     if "Trend Catcher Bullish" in signal_text:
