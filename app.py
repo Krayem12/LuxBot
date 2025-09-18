@@ -32,6 +32,15 @@ general_trend = {}
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# ===== إعداد الاتجاه العام والتأكيدي (داخلي) =====
+SETTINGS = {
+    "SPX500": {
+        "trend_catcher": "bullish",   # الاتجاه العام
+        "trend_tracer": "bullish"     # الاتجاه التأكيدي
+    },
+    # تقدر تضيف رموز ثانية بنفس الشكل
+}
+
 # ===== دالة ترجع الوقت السعودي =====
 def get_sa_time():
     return (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
@@ -96,17 +105,18 @@ def process_signal(symbol: str, signal_text: str):
         # الاتجاه المتوقع من Price Explosion بناءً على CALL/PUT
         expected_trend = "bullish" if pe_match == "CALL" else "bearish"
 
-        # تحقق من Trend Catcher (الاتجاه العام)
-        current_trend = general_trend.get(symbol)
-        if current_trend != expected_trend:
-            reason = "لا يوجد اتجاه عام محدد" if not current_trend else f"Trend Catcher {current_trend} يختلف عن {expected_trend}"
+        # تحقق من Trend Catcher في الإعدادات
+        trend_catcher = SETTINGS.get(symbol, {}).get("trend_catcher")
+        if trend_catcher != expected_trend:
+            reason = f"Trend Catcher {trend_catcher} يختلف عن {expected_trend}"
             logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} {reason}")
             return
 
-        # تحقق من Trend Tracer (لازم يكون بنفس الاتجاه)
-        tracer_expected = f"Trend Tracer {expected_trend.capitalize()}"
-        if tracer_expected not in signal_text:
-            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} لأنه لا يوجد {tracer_expected}")
+        # تحقق من Trend Tracer في الإعدادات
+        trend_tracer = SETTINGS.get(symbol, {}).get("trend_tracer")
+        if trend_tracer != expected_trend:
+            reason = f"Trend Tracer {trend_tracer} يختلف عن {expected_trend}"
+            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} {reason}")
             return
 
         # حاول استخراج السعر بعد @
@@ -129,11 +139,11 @@ def process_signal(symbol: str, signal_text: str):
             f"{label_text}\n"
             f"{emoji} {pe_match} — {symbol}\n"
             f"💰 Price: {price_text}\n"
-            f"📊 Confirmed with: Trend Catcher ✅ + Trend Tracer ✅\n"
+            f"📊 Confirmed with internal settings: Trend Catcher ✅ + Trend Tracer ✅\n"
             f"⏰ Time: {sa_time}"
         )
         send_message(message)
-        logger.info(f"[{sa_time}] ✅ {symbol}: {pe_label} Price Explosion {pe_match} confirmed with Trend Catcher + Tracer sent with price {price_text}")
+        logger.info(f"[{sa_time}] ✅ {symbol}: {pe_label} Price Explosion {pe_match} confirmed with SETTINGS sent with price {price_text}")
         return
 
     # ===== الاتجاه العام (Trend Catcher) =====
