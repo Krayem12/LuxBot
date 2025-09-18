@@ -107,35 +107,24 @@ def process_signal(symbol: str, signal_text: str):
         # تحقق من Trend Catcher في الإعدادات
         trend_catcher = SETTINGS.get(symbol, {}).get("trend_catcher")
         if trend_catcher != expected_trend:
-            reason = f"Trend Catcher {trend_catcher} يختلف عن {expected_trend}"
-            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} {reason}")
+            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} لأن Trend Catcher={trend_catcher}")
             return
 
         # تحقق من Trend Tracer في الإعدادات
         trend_tracer = SETTINGS.get(symbol, {}).get("trend_tracer")
         if trend_tracer != expected_trend:
-            reason = f"Trend Tracer {trend_tracer} يختلف عن {expected_trend}"
-            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} {reason}")
+            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} لأن Trend Tracer={trend_tracer}")
             return
 
-        # ===== ✅ شرط HyperWave =====
-        hw_match = re.search(r"HyperWave\s*=\s*([0-9]+)", signal_text)
-        hw_value = int(hw_match.group(1)) if hw_match else None
-
-        hw_dir = None
-        if "up" in signal_text.lower():
-            hw_dir = "up"
-        elif "down" in signal_text.lower():
-            hw_dir = "down"
-
+        # ===== ✅ شرط HyperWave (LuxAlgo signals) =====
         if expected_trend == "bullish":
-            if not hw_value or hw_value >= 20 or hw_dir != "up":
-                logger.info(f"[{sa_time}] ⚡ تجاهل CALL Explosion لـ {symbol} شرط HyperWave غير محقق (value={hw_value}, dir={hw_dir})")
+            if "oversold_bullish_hyperwave_signal" not in signal_text.lower():
+                logger.info(f"[{sa_time}] ⚡ تجاهل CALL Explosion لـ {symbol} شرط HyperWave غير محقق (oversold bullish غير موجود)")
                 return
 
         if expected_trend == "bearish":
-            if not hw_value or hw_value <= 80 or hw_dir != "down":
-                logger.info(f"[{sa_time}] ⚡ تجاهل PUT Explosion لـ {symbol} شرط HyperWave غير محقق (value={hw_value}, dir={hw_dir})")
+            if "overbought_bearish_hyperwave_signal" not in signal_text.lower():
+                logger.info(f"[{sa_time}] ⚡ تجاهل PUT Explosion لـ {symbol} شرط HyperWave غير محقق (overbought bearish غير موجود)")
                 return
         # ===== ==================== =====
 
@@ -160,11 +149,10 @@ def process_signal(symbol: str, signal_text: str):
             f"{emoji} {pe_match} — {symbol}\n"
             f"💰 Price: {price_text}\n"
             f"📊 Confirmed with: Trend Catcher ✅ + Trend Tracer ✅ + HyperWave ✅\n"
-            f"📉 HyperWave: {hw_value} ({hw_dir})\n"
             f"⏰ Time: {sa_time}"
         )
         send_message(message)
-        logger.info(f"[{sa_time}] ✅ {symbol}: {pe_label} Price Explosion {pe_match} confirmed with HyperWave={hw_value}, dir={hw_dir}")
+        logger.info(f"[{sa_time}] ✅ {symbol}: {pe_label} Price Explosion {pe_match} confirmed with HyperWave signal")
         return
 
     # ===== الاتجاه العام (Trend Catcher) =====
