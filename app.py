@@ -32,13 +32,12 @@ general_trend = {}
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# ===== إعداد الاتجاه العام والتأكيدي (داخلي) =====
+# ===== إعداد الاتجاه العام والتأكيدي (داخلي لفلترة Price Explosion) =====
 SETTINGS = {
     "SPX500": {
         "trend_catcher": "bullish",   # الاتجاه العام
         "trend_tracer": "bullish"     # الاتجاه التأكيدي
     },
-    # تقدر تضيف رموز ثانية بنفس الشكل
 }
 
 # ===== دالة ترجع الوقت السعودي =====
@@ -119,6 +118,27 @@ def process_signal(symbol: str, signal_text: str):
             logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} {reason}")
             return
 
+        # ===== ✅ شرط HyperWave =====
+        hw_match = re.search(r"HyperWave\s*=\s*([0-9]+)", signal_text)
+        hw_value = int(hw_match.group(1)) if hw_match else None
+
+        hw_dir = None
+        if "up" in signal_text.lower():
+            hw_dir = "up"
+        elif "down" in signal_text.lower():
+            hw_dir = "down"
+
+        if expected_trend == "bullish":
+            if not hw_value or hw_value >= 20 or hw_dir != "up":
+                logger.info(f"[{sa_time}] ⚡ تجاهل CALL Explosion لـ {symbol} شرط HyperWave غير محقق (value={hw_value}, dir={hw_dir})")
+                return
+
+        if expected_trend == "bearish":
+            if not hw_value or hw_value <= 80 or hw_dir != "down":
+                logger.info(f"[{sa_time}] ⚡ تجاهل PUT Explosion لـ {symbol} شرط HyperWave غير محقق (value={hw_value}, dir={hw_dir})")
+                return
+        # ===== ==================== =====
+
         # حاول استخراج السعر بعد @
         price_match = re.search(r"@[\s]*([0-9]*\.?[0-9]+)", signal_text)
         price_text = price_match.group(1) if price_match else "N/A"
@@ -139,11 +159,12 @@ def process_signal(symbol: str, signal_text: str):
             f"{label_text}\n"
             f"{emoji} {pe_match} — {symbol}\n"
             f"💰 Price: {price_text}\n"
-            f"📊 Confirmed with internal settings: Trend Catcher ✅ + Trend Tracer ✅\n"
+            f"📊 Confirmed with: Trend Catcher ✅ + Trend Tracer ✅ + HyperWave ✅\n"
+            f"📉 HyperWave: {hw_value} ({hw_dir})\n"
             f"⏰ Time: {sa_time}"
         )
         send_message(message)
-        logger.info(f"[{sa_time}] ✅ {symbol}: {pe_label} Price Explosion {pe_match} confirmed with SETTINGS sent with price {price_text}")
+        logger.info(f"[{sa_time}] ✅ {symbol}: {pe_label} Price Explosion {pe_match} confirmed with HyperWave={hw_value}, dir={hw_dir}")
         return
 
     # ===== الاتجاه العام (Trend Catcher) =====
