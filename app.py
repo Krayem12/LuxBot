@@ -93,6 +93,15 @@ def process_signal(symbol: str, signal_text: str):
         pe_match, pe_label = "PUT", "Conservative"
 
     if pe_match:
+        # ===== تحقق من الاتجاه العام =====
+        expected_trend = "bullish" if pe_match == "CALL" else "bearish"
+        current_trend = general_trend.get(symbol)
+
+        if current_trend != expected_trend:
+            reason = "لا يوجد اتجاه عام محدد" if not current_trend else f"الاتجاه العام هو {current_trend} ويخالف {expected_trend}"
+            logger.info(f"[{sa_time}] ⏭️ تجاهل Price Explosion {pe_match} لـ {symbol} {reason}")
+            return
+
         # حاول استخراج السعر بعد @
         price_match = re.search(r"@[\s]*([0-9]*\.?[0-9]+)", signal_text)
         price_text = price_match.group(1) if price_match else "N/A"
