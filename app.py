@@ -93,13 +93,12 @@ def process_signal(symbol: str, signal_text: str):
         pe_match, pe_label = "PUT", "Conservative"
 
     if pe_match:
-        # ===== تحقق من الاتجاه العام =====
+        # الاتجاه الخاص بـ Price Explosion نفسه
         expected_trend = "bullish" if pe_match == "CALL" else "bearish"
-        current_trend = general_trend.get(symbol)
 
-        if current_trend != expected_trend:
-            reason = "لا يوجد اتجاه عام محدد" if not current_trend else f"الاتجاه العام هو {current_trend} ويخالف {expected_trend}"
-            logger.info(f"[{sa_time}] ⏭️ تجاهل Price Explosion {pe_match} لـ {symbol} {reason}")
+        # تحقق أن الاتجاه المطلوب مدمج في نص الإشارة
+        if expected_trend.lower() not in signal_text.lower():
+            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} لأنه لا يطابق الاتجاه المطلوب ({expected_trend})")
             return
 
         # حاول استخراج السعر بعد @
