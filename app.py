@@ -93,12 +93,25 @@ def process_signal(symbol: str, signal_text: str):
         pe_match, pe_label = "PUT", "Conservative"
 
     if pe_match:
-        # الاتجاه الخاص بـ Price Explosion نفسه
+        # الاتجاه المتوقع من Price Explosion
         expected_trend = "bullish" if pe_match == "CALL" else "bearish"
 
-        # تحقق أن الاتجاه المطلوب مدمج في نص الإشارة
+        # تحقق من الاتجاه الداخلي
         if expected_trend.lower() not in signal_text.lower():
-            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} لأنه لا يطابق الاتجاه المطلوب ({expected_trend})")
+            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} لأنه لا يطابق الاتجاه الداخلي ({expected_trend})")
+            return
+
+        # تحقق من Trend Catcher (الاتجاه العام)
+        current_trend = general_trend.get(symbol)
+        if current_trend != expected_trend:
+            reason = "لا يوجد اتجاه عام محدد" if not current_trend else f"Trend Catcher {current_trend} يختلف عن {expected_trend}"
+            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} {reason}")
+            return
+
+        # تحقق من Trend Tracer (لازم يكون بنفس الاتجاه)
+        tracer_expected = f"Trend Tracer {expected_trend.capitalize()}"
+        if tracer_expected not in signal_text:
+            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} لأنه لا يوجد {tracer_expected}")
             return
 
         # حاول استخراج السعر بعد @
@@ -121,10 +134,11 @@ def process_signal(symbol: str, signal_text: str):
             f"{label_text}\n"
             f"{emoji} {pe_match} — {symbol}\n"
             f"💰 Price: {price_text}\n"
+            f"📊 Confirmed with: Trend Catcher ✅ + Trend Tracer ✅\n"
             f"⏰ Time: {sa_time}"
         )
         send_message(message)
-        logger.info(f"[{sa_time}] ✅ {symbol}: {pe_label} Price Explosion {pe_match} sent with price {price_text}")
+        logger.info(f"[{sa_time}] ✅ {symbol}: {pe_label} Price Explosion {pe_match} confirmed with Trend Catcher + Tracer sent with price {price_text}")
         return
 
     # ===== الاتجاه العام (Trend Catcher) =====
