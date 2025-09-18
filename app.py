@@ -93,13 +93,8 @@ def process_signal(symbol: str, signal_text: str):
         pe_match, pe_label = "PUT", "Conservative"
 
     if pe_match:
-        # الاتجاه المتوقع من Price Explosion
+        # الاتجاه المتوقع من Price Explosion بناءً على CALL/PUT
         expected_trend = "bullish" if pe_match == "CALL" else "bearish"
-
-        # تحقق من الاتجاه الداخلي
-        if expected_trend.lower() not in signal_text.lower():
-            logger.info(f"[{sa_time}] ⚡ تجاهل Price Explosion {pe_match} لـ {symbol} لأنه لا يطابق الاتجاه الداخلي ({expected_trend})")
-            return
 
         # تحقق من Trend Catcher (الاتجاه العام)
         current_trend = general_trend.get(symbol)
