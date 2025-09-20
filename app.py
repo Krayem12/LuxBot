@@ -1,21 +1,12 @@
 from flask import Flask, request, jsonify
 import datetime
-import requests
 import logging
 import re
 
 app = Flask(__name__)
 
-# ===== إعداد التوقيت السعودي =====
-TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
-
-# ===== إعدادات الإرسال =====
-TELEGRAM_TOKEN = None  # عطلنا التليجرام مؤقتاً
-TELEGRAM_CHAT_ID = None
-EXTERNAL_URL = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
-
-# القيم الممكنة: both / telegram / external / none
-SEND_MODE = "both"
+# ===== Saudi time offset =====
+TIMEZONE_OFFSET = 3  # +3 hours for Saudi time
 
 # ===== Logging =====
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -24,44 +15,12 @@ logger = logging.getLogger(__name__)
 def get_sa_time():
     return (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
 
-def send_telegram(message: str):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.info(f"[{get_sa_time()}] ⏸️ إرسال للتليجرام معطل")
-        return
-
-def send_external(message: str):
-    try:
-        resp = requests.post(
-            EXTERNAL_URL,
-            data=message.encode("utf-8"),
-            headers={"Content-Type": "text/plain"},
-            timeout=10
-        )
-        if resp.status_code != 200:
-            logger.error(f"[{get_sa_time()}] ❌ External send failed {resp.status_code}: {resp.text}")
-        else:
-            logger.info(f"[{get_sa_time()}] ✅ أُرسل للخادم الخارجي")
-    except Exception as e:
-        logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال للخادم الخارجي: {e}")
-
-def send_message(message: str):
-    if SEND_MODE == "telegram":
-        send_telegram(message)
-    elif SEND_MODE == "external":
-        send_external(message)
-    elif SEND_MODE == "both":
-        send_telegram(message)
-        send_external(message)
-    else:
-        logger.info(f"[{get_sa_time()}] ⏸️ جميع الإرسالات معطلة (SEND_MODE={SEND_MODE})")
-
-# ===== معالجة الرمز =====
+# ===== Symbol processing =====
 SYMBOL_PATTERN = re.compile(r"^(?P<head>.*?)(?:\s*-\s*)(?P<sym>[A-Za-z0-9_:+.\-]+)\s*$")
 
 def apply_symbol(raw_message: str, symbol: str | None) -> str:
     if not symbol:
         return raw_message
-
     m = SYMBOL_PATTERN.match(raw_message)
     if m:
         head = m.group("head").rstrip()
@@ -73,10 +32,10 @@ def apply_symbol(raw_message: str, symbol: str | None) -> str:
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # الرمز من Query
+        # Symbol from query string
         symbol_from_query = request.args.get("symbol", "").strip() or None
 
-        # الرسالة + الرمز من JSON
+        # Message + symbol from JSON
         data = request.get_json(silent=True)
         raw_message = None
         symbol_from_json = None
@@ -97,22 +56,22 @@ def webhook():
             raw_message = request.data.decode("utf-8").strip()
 
         if not raw_message:
-            return jsonify({"status": "خطأ", "reason": "لم يتم العثور على رسالة"}), 400
+            return jsonify({"status": "error", "reason": "No message found"}), 400
 
-        # أولوية الرمز: JSON > Query
+        # Priority: JSON > Query
         symbol_to_apply = symbol_from_json or symbol_from_query or None
         msg_with_symbol = apply_symbol(raw_message, symbol_to_apply)
 
         sa_time = get_sa_time()
-        logger.info(f"[{sa_time}] 🌐 طلب وارد: {raw_message} | بعد التعديل: {msg_with_symbol}")
-
         final_message = f"{msg_with_symbol}\n⏰ {sa_time}"
-        send_message(final_message)
 
-        return jsonify({"status": "success"}), 200
+        # Disabled sending: only log
+        logger.info(f"[{sa_time}] Received message (not sent): {final_message}")
+
+        return jsonify({"status": "success", "message": final_message}), 200
 
     except Exception as e:
-        logger.error(f"[{get_sa_time()}] ❌ خطأ في المعالجة: {e}")
+        logger.error(f"[{get_sa_time()}] Error processing request: {e}")
         return jsonify({"status": "error", "reason": str(e)}), 500
 
 if __name__ == "__main__":
