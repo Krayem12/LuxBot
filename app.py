@@ -2,49 +2,33 @@ from flask import Flask, request, jsonify
 import datetime
 import requests
 import logging
-import os  # لإدارة متغيرات البيئة
+import re
 
 app = Flask(__name__)
 
 # ===== إعداد التوقيت السعودي =====
 TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 
-# ===== بيانات التليجرام (من Environment Variables) =====
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-# ===== رابط الخادم الخارجي =====
+# ===== إعدادات الإرسال =====
+TELEGRAM_TOKEN = None  # عطلنا التليجرام مؤقتاً
+TELEGRAM_CHAT_ID = None
 EXTERNAL_URL = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
 
-# ===== متغير تحكم (إرسال أو تعطيل) =====
-# القيم الممكنة: "both" / "telegram" / "external" / "none"
-SEND_MODE = os.getenv("SEND_MODE", "none").lower()
+# القيم الممكنة: both / telegram / external / none
+SEND_MODE = "both"
 
 # ===== Logging =====
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# ===== دالة ترجع الوقت السعودي =====
 def get_sa_time():
     return (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
 
-# ===== إرسال رسالة للتليجرام =====
 def send_telegram(message: str):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.warning(f"[{get_sa_time()}] ⚠️ لم يتم ضبط بيانات التليجرام")
+        logger.info(f"[{get_sa_time()}] ⏸️ إرسال للتليجرام معطل")
         return
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-        resp = requests.post(url, json=payload, timeout=10)
-        if resp.status_code != 200:
-            logger.error(f"[{get_sa_time()}] ❌ Telegram send failed {resp.status_code}: {resp.text}")
-        else:
-            logger.info(f"[{get_sa_time()}] ✅ أُرسل للتليجرام")
-    except Exception as e:
-        logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال التليجرام: {e}")
 
-# ===== إرسال للخادم الخارجي =====
 def send_external(message: str):
     try:
         resp = requests.post(
@@ -60,7 +44,6 @@ def send_external(message: str):
     except Exception as e:
         logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال للخادم الخارجي: {e}")
 
-# ===== دالة إرسال حسب متغير SEND_MODE =====
 def send_message(message: str):
     if SEND_MODE == "telegram":
         send_telegram(message)
@@ -72,17 +55,39 @@ def send_message(message: str):
     else:
         logger.info(f"[{get_sa_time()}] ⏸️ جميع الإرسالات معطلة (SEND_MODE={SEND_MODE})")
 
+# ===== معالجة الرمز =====
+SYMBOL_PATTERN = re.compile(r"^(?P<head>.*?)(?:\s*-\s*)(?P<sym>[A-Za-z0-9_:+.\-]+)\s*$")
+
+def apply_symbol(raw_message: str, symbol: str | None) -> str:
+    if not symbol:
+        return raw_message
+
+    m = SYMBOL_PATTERN.match(raw_message)
+    if m:
+        head = m.group("head").rstrip()
+        return f"{head} - {symbol}"
+    else:
+        return f"{raw_message.strip()} - {symbol}"
+
 # ===== Webhook =====
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
+        # الرمز من Query
+        symbol_from_query = request.args.get("symbol", "").strip() or None
+
+        # الرسالة + الرمز من JSON
         data = request.get_json(silent=True)
         raw_message = None
+        symbol_from_json = None
 
-        if data:
-            if "message" in data:
+        if data and isinstance(data, dict):
+            if "message" in data and isinstance(data["message"], str):
                 raw_message = data["message"].strip()
-            else:
+            if "symbol" in data and isinstance(data["symbol"], str):
+                symbol_from_json = data["symbol"].strip()
+
+            if not raw_message:
                 for v in data.values():
                     if isinstance(v, str) and v.strip():
                         raw_message = v.strip()
@@ -94,11 +99,14 @@ def webhook():
         if not raw_message:
             return jsonify({"status": "خطأ", "reason": "لم يتم العثور على رسالة"}), 400
 
+        # أولوية الرمز: JSON > Query
+        symbol_to_apply = symbol_from_json or symbol_from_query or None
+        msg_with_symbol = apply_symbol(raw_message, symbol_to_apply)
+
         sa_time = get_sa_time()
-        logger.info(f"[{sa_time}] 🌐 طلب وارد: {raw_message}")
+        logger.info(f"[{sa_time}] 🌐 طلب وارد: {raw_message} | بعد التعديل: {msg_with_symbol}")
 
-        final_message = f"{raw_message}\n⏰ {sa_time}"
-
+        final_message = f"{msg_with_symbol}\n⏰ {sa_time}"
         send_message(final_message)
 
         return jsonify({"status": "success"}), 200
