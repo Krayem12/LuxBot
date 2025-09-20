@@ -1,86 +1,129 @@
+#!/usr/bin/env python3
 from flask import Flask, request, jsonify
+import os
 import datetime
+import requests
 import logging
-import re
 
 app = Flask(__name__)
 
-# ===== Saudi time offset =====
-TIMEZONE_OFFSET = 3  # +3 hours for Saudi time
+# -----------------------
+# Configuration (env)
+# -----------------------
+TIMEZONE_OFFSET = int(os.getenv("TIMEZONE_OFFSET", "3"))  # +3 hours (Saudi)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")              # e.g. 123:ABC...
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")          # chat id or channel id
+EXTERNAL_URL = os.getenv("EXTERNAL_URL", "")              # e.g. https://backend.example.com/sendMessage
 
-# ===== Logging =====
+# SEND_MODE: "both" / "telegram" / "external" / "none"
+SEND_MODE = os.getenv("SEND_MODE", "none").lower()
+
+# Simple access control: if WEBHOOK_TOKEN set, require X-ACCESS-TOKEN header to match
+WEBHOOK_TOKEN = os.getenv("WEBHOOK_TOKEN")
+
+# -----------------------
+# Logging
+# -----------------------
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("webhook")
 
-# ===== Store last used symbol =====
-last_symbol = None
-
-def get_sa_time():
+# -----------------------
+# Helpers
+# -----------------------
+def get_sa_time() -> str:
     return (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
 
-# ===== Symbol processing =====
-SYMBOL_PATTERN = re.compile(r"^(?P<head>.*?)(?:\s*-\s*)(?P<sym>[A-Za-z0-9_:+.\-]+)\s*$")
+def send_telegram(text: str) -> None:
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning(f"[{get_sa_time()}] Telegram not configured (TELEGRAM_TOKEN/TELEGRAM_CHAT_ID missing).")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code != 200:
+            logger.error(f"[{get_sa_time()}] Telegram send failed {resp.status_code}: {resp.text}")
+        else:
+            logger.info(f"[{get_sa_time()}] Sent to Telegram")
+    except Exception as e:
+        logger.error(f"[{get_sa_time()}] Telegram exception: {e}")
 
-def apply_symbol(raw_message: str, symbol: str | None) -> str:
-    if not symbol:
-        return raw_message
-    m = SYMBOL_PATTERN.match(raw_message)
-    if m:
-        head = m.group("head").rstrip()
-        return f"{head} - {symbol}"
+def send_external(text: str) -> None:
+    if not EXTERNAL_URL:
+        logger.warning(f"[{get_sa_time()}] External URL not configured (EXTERNAL_URL missing).")
+        return
+    try:
+        resp = requests.post(EXTERNAL_URL, data=text.encode("utf-8"), headers={"Content-Type":"text/plain"}, timeout=10)
+        if resp.status_code != 200:
+            logger.error(f"[{get_sa_time()}] External send failed {resp.status_code}: {resp.text}")
+        else:
+            logger.info(f"[{get_sa_time()}] Sent to external server")
+    except Exception as e:
+        logger.error(f"[{get_sa_time()}] External exception: {e}")
+
+def dispatch_message(final_text: str) -> None:
+    """Dispatch according to SEND_MODE"""
+    if SEND_MODE == "telegram":
+        send_telegram(final_text)
+    elif SEND_MODE == "external":
+        send_external(final_text)
+    elif SEND_MODE == "both":
+        send_telegram(final_text)
+        send_external(final_text)
     else:
-        return f"{raw_message.strip()} - {symbol}"
+        logger.info(f"[{get_sa_time()}] SEND_MODE={SEND_MODE} -> not sending (message logged only)")
 
-# ===== Webhook =====
+def check_auth() -> bool:
+    """Return True if request allowed. If WEBHOOK_TOKEN is not set -> allow."""
+    if not WEBHOOK_TOKEN:
+        return True
+    header = request.headers.get("X-ACCESS-TOKEN", "")
+    return header == WEBHOOK_TOKEN
+
+# -----------------------
+# Webhook endpoint
+# -----------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    global last_symbol
-    try:
-        # Symbol from query string
-        symbol_from_query = request.args.get("symbol", "").strip() or None
+    if not check_auth():
+        logger.warning(f"[{get_sa_time()}] Unauthorized request blocked.")
+        return jsonify({"status":"error","reason":"unauthorized"}), 401
 
-        # Message + symbol from JSON
-        data = request.get_json(silent=True)
-        raw_message = None
-        symbol_from_json = None
+    # try JSON "message" first, otherwise raw body string
+    data = request.get_json(silent=True)
+    msg = None
+    if data and isinstance(data, dict):
+        msg = data.get("message")
+        # if no explicit message, try to find any string value
+        if not msg:
+            for v in data.values():
+                if isinstance(v, str) and v.strip():
+                    msg = v.strip()
+                    break
 
-        if data and isinstance(data, dict):
-            if "message" in data and isinstance(data["message"], str):
-                raw_message = data["message"].strip()
-            if "symbol" in data and isinstance(data["symbol"], str):
-                symbol_from_json = data["symbol"].strip()
+    if not msg:
+        # fallback to raw body text
+        raw = request.data.decode("utf-8").strip()
+        if raw:
+            msg = raw
 
-            if not raw_message:
-                for v in data.values():
-                    if isinstance(v, str) and v.strip():
-                        raw_message = v.strip()
-                        break
+    if not msg:
+        return jsonify({"status":"error","reason":"no message found"}), 400
 
-        if not raw_message:
-            raw_message = request.data.decode("utf-8").strip()
+    sa_time = get_sa_time()
+    final_text = f"{msg}\n⏰ {sa_time}"
 
-        if not raw_message:
-            return jsonify({"status": "error", "reason": "No message found"}), 400
+    # Always log
+    logger.info(f"[{sa_time}] Received message: {final_text}")
 
-        # Priority: JSON > Query > last stored
-        if symbol_from_json:
-            last_symbol = symbol_from_json
-        elif symbol_from_query:
-            last_symbol = symbol_from_query
+    # Dispatch according to SEND_MODE
+    dispatch_message(final_text)
 
-        msg_with_symbol = apply_symbol(raw_message, last_symbol)
+    return jsonify({"status":"success","message":final_text,"send_mode":SEND_MODE}), 200
 
-        sa_time = get_sa_time()
-        final_message = f"{msg_with_symbol}\n⏰ {sa_time}"
-
-        # Disabled sending: only log
-        logger.info(f"[{sa_time}] Received message (not sent): {final_message}")
-
-        return jsonify({"status": "success", "message": final_message, "current_symbol": last_symbol}), 200
-
-    except Exception as e:
-        logger.error(f"[{get_sa_time()}] Error processing request: {e}")
-        return jsonify({"status": "error", "reason": str(e)}), 500
-
+# -----------------------
+# Run
+# -----------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    # for production use a proper WSGI server (gunicorn/uvicorn)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
