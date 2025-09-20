@@ -1,8 +1,5 @@
 from flask import Flask, request, jsonify
 import datetime
-import hashlib
-from collections import defaultdict
-import re
 import requests
 import logging
 import os  # لإدارة متغيرات البيئة
@@ -21,13 +18,6 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
 
 # ===== رابط الخادم الخارجي =====
 EXTERNAL_URL = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
-
-# ===== التخزين بالذاكرة =====
-signals_store = defaultdict(lambda: {"bullish": {}, "bearish": {}})
-used_signals = defaultdict(lambda: {"bullish": [], "bearish": []})
-alerts_count = defaultdict(lambda: {"bullish": 0, "bearish": 0})
-general_trend = {}
-explosion_signals = defaultdict(lambda: {"put": set(), "call": set()})  # 🔥 تخزين إشارات الانفجار
 
 # ===== Logging =====
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -48,7 +38,7 @@ def send_telegram(message: str):
     except Exception as e:
         logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال التليجرام: {e}")
 
-# ===== إرسال نفس النص للخادم الخارجي =====
+# ===== إرسال نفس النص للخادم الخارجي (مطابق لتنسيق التليجرام) =====
 def send_external(message: str):
     try:
         resp = requests.post(
@@ -65,167 +55,16 @@ def send_external(message: str):
 # ===== دالة إرسال مزدوج (تليجرام + خارجي) =====
 def send_message(message: str):
     send_telegram(message)
-    send_external(message)
-
-# ===== معالجة الإشارات =====
-def process_signal(symbol: str, signal_text: str):
-    sa_time = get_sa_time()
-
-    # ===== إشارات الانفجار السعري (p1..p4, c1..c4) =====
-    if re.fullmatch(r"[pc][1-4]", signal_text.lower()):
-        cond = signal_text.lower()
-
-        if cond.startswith("p"):  # إشارات PUT
-            explosion_signals[symbol]["put"].add(cond)
-            logger.info(f"[{sa_time}] 📌 {symbol}: خزّنا إشارة {cond.upper()} (PUT)")
-
-            if all(f"p{i}" in explosion_signals[symbol]["put"] for i in range(1, 5)):
-                if general_trend.get(symbol) == "bearish":
-                    msg = (
-                        f"🚀🔴 انفجار سعري (PUT)\n"
-                        f"🔻 الرمز: {symbol}\n"
-                        f"📊 الاتجاه العام: هبوط (Bearish)\n"
-                        f"📝 الشروط المحققة: P1 + P2 + P3 + P4\n"
-                        f"⏰ الوقت: {sa_time}"
-                    )
-                    send_message(msg)
-                    logger.info(f"[{sa_time}] ✅ {symbol}: تم تحقق انفجار سعري كامل (PUT)")
-                else:
-                    logger.info(f"[{sa_time}] ⏭️ تجاهل انفجار PUT لأن الاتجاه العام ليس Bearish ({general_trend.get(symbol)})")
-                explosion_signals[symbol]["put"].clear()  # مسح التخزين بعد المحاولة
-
-        else:  # إشارات CALL
-            explosion_signals[symbol]["call"].add(cond)
-            logger.info(f"[{sa_time}] 📌 {symbol}: خزّنا إشارة {cond.upper()} (CALL)")
-
-            if all(f"c{i}" in explosion_signals[symbol]["call"] for i in range(1, 5)):
-                if general_trend.get(symbol) == "bullish":
-                    msg = (
-                        f"🚀🟢 انفجار سعري (CALL)\n"
-                        f"🔺 الرمز: {symbol}\n"
-                        f"📊 الاتجاه العام: صعود (Bullish)\n"
-                        f"📝 الشروط المحققة: C1 + C2 + C3 + C4\n"
-                        f"⏰ الوقت: {sa_time}"
-                    )
-                    send_message(msg)
-                    logger.info(f"[{sa_time}] ✅ {symbol}: تم تحقق انفجار سعري كامل (CALL)")
-                else:
-                    logger.info(f"[{sa_time}] ⏭️ تجاهل انفجار CALL لأن الاتجاه العام ليس Bullish ({general_trend.get(symbol)})")
-                explosion_signals[symbol]["call"].clear()  # مسح التخزين بعد المحاولة
-        return
-
-    # ===== الاتجاه العام (Trend Catcher) =====
-    trend_catcher = None
-    if "Trend Catcher Bullish" in signal_text:
-        trend_catcher = "bullish"
-    elif "Trend Catcher Bearish" in signal_text:
-        trend_catcher = "bearish"
-
-    if trend_catcher:
-        prev_trend = general_trend.get(symbol)
-        if prev_trend != trend_catcher:
-            general_trend[symbol] = trend_catcher
-            signals_store[symbol] = {"bullish": {}, "bearish": {}}
-            used_signals[symbol] = {"bullish": [], "bearish": []}
-            alerts_count[symbol] = {"bullish": 0, "bearish": 0}
-            explosion_signals[symbol] = {"put": set(), "call": set()}  # 🔥 مسح التخزين عند تغير الاتجاه
-
-            emoji = "🟢📈" if trend_catcher == "bullish" else "🔴📉"
-            arabic_trend = "صعود" if trend_catcher == "bullish" else "هبوط"
-            message = (
-                f"📢 تحديث الاتجاه العام\n"
-                f"{emoji} الرمز: {symbol}\n"
-                f"📊 الاتجاه الحالي: {arabic_trend}\n"
-                f"⏰ الوقت: {sa_time}\n"
-                f"⚠️ إشارات الدخول السابقة تم مسحها تلقائيًا"
-            )
-            send_message(message)
-            logger.info(f"[{sa_time}] ⚠️ {symbol}: تغير الاتجاه العام {prev_trend} → {trend_catcher}")
-        return
-
-    # ===== تأكيد الاتجاه (Trend Crossing) =====
-    if "Trend Crossing Up" in signal_text:
-        if general_trend.get(symbol) == "bullish":
-            message = (
-                f"📢 تم تأكيد الاتجاه الى صعود قوي\n"
-                f"🟢📈 الرمز: {symbol}\n"
-                f"⏰ الوقت: {sa_time}"
-            )
-            send_message(message)
-            logger.info(f"[{sa_time}] ✅ {symbol}: تم تأكيد الاتجاه صعود قوي")
-        return
-
-    if "Trend Crossing Down" in signal_text:
-        if general_trend.get(symbol) == "bearish":
-            message = (
-                f"📢 تم تأكيد الاتجاه الى هبوط قوي\n"
-                f"🔴📉 الرمز: {symbol}\n"
-                f"⏰ الوقت: {sa_time}"
-            )
-            send_message(message)
-            logger.info(f"[{sa_time}] ✅ {symbol}: تم تأكيد الاتجاه هبوط قوي")
-        return
-
-    # ===== إشارات الدخول العادية =====
-    direction = None
-    if re.search(r"\bbullish\b", signal_text, re.I) or re.search(r"\bupward\b", signal_text, re.I):
-        direction = "bullish"
-    elif re.search(r"\bbearish\b", signal_text, re.I) or re.search(r"\bdownward\b", signal_text, re.I):
-        direction = "bearish"
-
-    if not direction:
-        logger.info(f"[{sa_time}] ⏭️ تجاهل إشارة غير معروفة: {signal_text}")
-        return
-
-    if symbol not in general_trend:
-        logger.info(f"[{sa_time}] ⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنه لا يوجد اتجاه عام محدد")
-        return
-
-    if direction != general_trend[symbol]:
-        logger.info(f"[{sa_time}] ⏭️ تجاهل إشارة {signal_text} لـ {symbol} لأنها تعاكس الاتجاه العام {general_trend[symbol]}")
-        return
-
-    signal_id = hashlib.sha256(signal_text.encode()).hexdigest()
-    if signal_id in signals_store[symbol][direction]:
-        logger.info(f"[{sa_time}] ⏭️ تجاهل إشارة مكررة: {signal_text}")
-        return
-
-    signals_store[symbol][direction][signal_id] = sa_time
-
-    if not any(sig["text"] == signal_text for sig in used_signals[symbol][direction]):
-        used_signals[symbol][direction].append({"text": signal_text, "time": sa_time})
-
-    total_new_signals = len(used_signals[symbol][direction])
-    logger.info(f"[{sa_time}] 📌 {symbol}: إشارات {direction} المخزنة = {total_new_signals}")
-
-    if total_new_signals % 2 == 0 and total_new_signals > 0:
-        alerts_count[symbol][direction] += 1
-        last_two = used_signals[symbol][direction][-2:]
-        emoji = "🟢" if direction == "bullish" else "🔴"
-        arabic_dir = "شراء" if direction == "bullish" else "بيع"
-
-        signals_details = "\n".join(
-            [f"- {sig['text']} (⏰ {sig['time']})" for sig in last_two]
-        )
-
-        message = (
-            f"📌 إشارة دخول جديدة (تنبيه رقم {alerts_count[symbol][direction]})\n"
-            f"{emoji} الرمز: {symbol}\n"
-            f"📊 نوع الإشارة: {arabic_dir}\n"
-            f"📝 الإشارتان المستخدمتان:\n{signals_details}\n"
-            f"📊 إجمالي الإشارات المختلفة المخزنة: {total_new_signals}\n"
-            f"📢 إجمالي عدد التنبيهات المرسلة: {alerts_count[symbol][direction]}\n"
-            f"⏰ وقت التنبيه: {sa_time}"
-        )
-        send_message(message)
-        logger.info(f"[{sa_time}] ✅ {symbol}: تم إرسال تنبيه دخول #{alerts_count[symbol][direction]} باعتماد إشارتين جديدتين")
+    send_external(message)  # يرسل نفس التنسيق
 
 # ===== Webhook =====
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
+        # استخرج الرسالة من JSON أو raw text
         data = request.get_json(silent=True)
         raw_message = None
+
         if data:
             if "message" in data:
                 raw_message = data["message"].strip()
@@ -234,22 +73,22 @@ def webhook():
                     if isinstance(v, str) and v.strip():
                         raw_message = v.strip()
                         break
+
         if not raw_message:
             raw_message = request.data.decode("utf-8").strip()
 
-        logger.info(f"[{get_sa_time()}] 🌐 طلب وارد: {raw_message}")
+        if not raw_message:
+            return jsonify({"status": "خطأ", "reason": "لم يتم العثور على رسالة"}), 400
 
-        parts = [p.strip() for p in raw_message.splitlines() if p.strip()]
-        if len(parts) == 1:
-            symbol = "SPX500"  # TradingView يرسل p1/c1 بدون الرمز
-            signal_text = parts[0]
-        elif len(parts) >= 2:
-            symbol = parts[-1]
-            signal_text = " ".join(parts[:-1])
-        else:
-            return jsonify({"status": "خطأ", "reason": "صيغة الرسالة غير صحيحة"}), 400
+        sa_time = get_sa_time()
+        logger.info(f"[{sa_time}] 🌐 طلب وارد: {raw_message}")
 
-        process_signal(symbol.strip(), signal_text.strip())
+        # صياغة الرسالة النهائية (مطابقة للتليجرام + فيها التوقيت)
+        final_message = f"{raw_message}\n⏰ {sa_time}"
+
+        # إرسال الرسالة
+        send_message(final_message)
+
         return jsonify({"status": "success"}), 200
 
     except Exception as e:
