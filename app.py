@@ -38,24 +38,16 @@ def send_telegram(message: str):
     except Exception as e:
         logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال التليجرام: {e}")
 
-# ===== إرسال نفس النص للخادم الخارجي (مطابق لتنسيق التليجرام) =====
+# ===== إرسال للخادم الخارجي (معطل مؤقتاً) =====
 def send_external(message: str):
-    try:
-        resp = requests.post(
-            EXTERNAL_URL,
-            data=message.encode("utf-8"),
-            headers={"Content-Type": "text/plain"},
-            timeout=10
-        )
-        if resp.status_code != 200:
-            logger.error(f"[{get_sa_time()}] ❌ External send failed {resp.status_code}: {resp.text}")
-    except Exception as e:
-        logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال للخادم الخارجي: {e}")
+    logger.info(f"[{get_sa_time()}] ⏸️ إرسال للخادم الخارجي معطل مؤقتاً")
+    # مبدئياً معطل، فقط سجل أنه تم تجاهله
+    # إذا أردت إعادة التفعيل: قم باستدعاء requests.post هنا
 
-# ===== دالة إرسال مزدوج (تليجرام + خارجي) =====
+# ===== دالة إرسال (حالياً تليجرام فقط) =====
 def send_message(message: str):
     send_telegram(message)
-    send_external(message)  # يرسل نفس التنسيق
+    # send_external(message)  # 🔴 تم تعطيله مؤقتاً
 
 # ===== Webhook =====
 @app.route("/webhook", methods=["POST"])
@@ -83,10 +75,10 @@ def webhook():
         sa_time = get_sa_time()
         logger.info(f"[{sa_time}] 🌐 طلب وارد: {raw_message}")
 
-        # صياغة الرسالة النهائية (مطابقة للتليجرام + فيها التوقيت)
+        # صياغة الرسالة النهائية
         final_message = f"{raw_message}\n⏰ {sa_time}"
 
-        # إرسال الرسالة
+        # إرسال الرسالة (فقط للتليجرام حالياً)
         send_message(final_message)
 
         return jsonify({"status": "success"}), 200
