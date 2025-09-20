@@ -13,11 +13,12 @@ TIMEZONE_OFFSET = 3  # +3 ساعات للتوقيت السعودي
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-    raise ValueError("❌ تأكد من ضبط TELEGRAM_TOKEN و TELEGRAM_CHAT_ID في متغيرات البيئة")
-
 # ===== رابط الخادم الخارجي =====
 EXTERNAL_URL = "https://backend-thrumming-moon-2807.fly.dev/sendMessage"
+
+# ===== متغير تحكم (إرسال أو تعطيل) =====
+# القيم الممكنة: "both" / "telegram" / "external" / "none"
+SEND_MODE = os.getenv("SEND_MODE", "none").lower()
 
 # ===== Logging =====
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -29,31 +30,52 @@ def get_sa_time():
 
 # ===== إرسال رسالة للتليجرام =====
 def send_telegram(message: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning(f"[{get_sa_time()}] ⚠️ لم يتم ضبط بيانات التليجرام")
+        return
     try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code != 200:
             logger.error(f"[{get_sa_time()}] ❌ Telegram send failed {resp.status_code}: {resp.text}")
+        else:
+            logger.info(f"[{get_sa_time()}] ✅ أُرسل للتليجرام")
     except Exception as e:
         logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال التليجرام: {e}")
 
-# ===== إرسال للخادم الخارجي (معطل مؤقتاً) =====
+# ===== إرسال للخادم الخارجي =====
 def send_external(message: str):
-    logger.info(f"[{get_sa_time()}] ⏸️ إرسال للخادم الخارجي معطل مؤقتاً")
-    # مبدئياً معطل، فقط سجل أنه تم تجاهله
-    # إذا أردت إعادة التفعيل: قم باستدعاء requests.post هنا
+    try:
+        resp = requests.post(
+            EXTERNAL_URL,
+            data=message.encode("utf-8"),
+            headers={"Content-Type": "text/plain"},
+            timeout=10
+        )
+        if resp.status_code != 200:
+            logger.error(f"[{get_sa_time()}] ❌ External send failed {resp.status_code}: {resp.text}")
+        else:
+            logger.info(f"[{get_sa_time()}] ✅ أُرسل للخادم الخارجي")
+    except Exception as e:
+        logger.error(f"[{get_sa_time()}] ❌ خطأ في إرسال للخادم الخارجي: {e}")
 
-# ===== دالة إرسال (حالياً تليجرام فقط) =====
+# ===== دالة إرسال حسب متغير SEND_MODE =====
 def send_message(message: str):
-    send_telegram(message)
-    # send_external(message)  # 🔴 تم تعطيله مؤقتاً
+    if SEND_MODE == "telegram":
+        send_telegram(message)
+    elif SEND_MODE == "external":
+        send_external(message)
+    elif SEND_MODE == "both":
+        send_telegram(message)
+        send_external(message)
+    else:
+        logger.info(f"[{get_sa_time()}] ⏸️ جميع الإرسالات معطلة (SEND_MODE={SEND_MODE})")
 
 # ===== Webhook =====
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # استخرج الرسالة من JSON أو raw text
         data = request.get_json(silent=True)
         raw_message = None
 
@@ -75,10 +97,8 @@ def webhook():
         sa_time = get_sa_time()
         logger.info(f"[{sa_time}] 🌐 طلب وارد: {raw_message}")
 
-        # صياغة الرسالة النهائية
         final_message = f"{raw_message}\n⏰ {sa_time}"
 
-        # إرسال الرسالة (فقط للتليجرام حالياً)
         send_message(final_message)
 
         return jsonify({"status": "success"}), 200
