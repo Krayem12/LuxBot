@@ -12,6 +12,9 @@ TIMEZONE_OFFSET = 3  # +3 hours for Saudi time
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# ===== Store last used symbol =====
+last_symbol = None
+
 def get_sa_time():
     return (datetime.datetime.utcnow() + datetime.timedelta(hours=TIMEZONE_OFFSET)).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -31,6 +34,7 @@ def apply_symbol(raw_message: str, symbol: str | None) -> str:
 # ===== Webhook =====
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    global last_symbol
     try:
         # Symbol from query string
         symbol_from_query = request.args.get("symbol", "").strip() or None
@@ -58,9 +62,13 @@ def webhook():
         if not raw_message:
             return jsonify({"status": "error", "reason": "No message found"}), 400
 
-        # Priority: JSON > Query
-        symbol_to_apply = symbol_from_json or symbol_from_query or None
-        msg_with_symbol = apply_symbol(raw_message, symbol_to_apply)
+        # Priority: JSON > Query > last stored
+        if symbol_from_json:
+            last_symbol = symbol_from_json
+        elif symbol_from_query:
+            last_symbol = symbol_from_query
+
+        msg_with_symbol = apply_symbol(raw_message, last_symbol)
 
         sa_time = get_sa_time()
         final_message = f"{msg_with_symbol}\n⏰ {sa_time}"
@@ -68,7 +76,7 @@ def webhook():
         # Disabled sending: only log
         logger.info(f"[{sa_time}] Received message (not sent): {final_message}")
 
-        return jsonify({"status": "success", "message": final_message}), 200
+        return jsonify({"status": "success", "message": final_message, "current_symbol": last_symbol}), 200
 
     except Exception as e:
         logger.error(f"[{get_sa_time()}] Error processing request: {e}")
